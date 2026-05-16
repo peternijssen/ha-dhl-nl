@@ -220,7 +220,7 @@ class DhlSentShipmentsSensor(
     """
 
     _attr_name = "DHL Outgoing Packages"
-    _attr_icon = "mdi:package-variant-closed-send"
+    _attr_icon = "mdi:package-variant-closed"
     _attr_native_unit_of_measurement = "packages"
 
     def __init__(
