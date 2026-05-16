@@ -1,6 +1,7 @@
 """DHL eCommerce NL API client."""
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -48,6 +49,7 @@ class DhlApiClient:
         self._password = password
         self._session = session
         self._user_info: dict[str, Any] | None = None
+        self._reauth_lock = asyncio.Lock()
 
     # ------------------------------------------------------------------
     # Public interface
@@ -80,50 +82,28 @@ class DhlApiClient:
         return data
 
     async def async_get_parcels(self) -> list[dict[str, Any]]:
-        """Retrieve the parcel list from the DHL parcels endpoint.
+        """Retrieve the parcel list, re-authenticating once on session expiry."""
+        async def _fetch() -> list[dict[str, Any]]:
+            headers = self._xsrf_headers()
+            async with self._session.get(PARCELS_URL, headers=headers) as response:
+                if response.status != 200:
+                    raise DhlApiError(response.status)
+                data: dict[str, Any] = await response.json()
+            return data.get("parcels", [])
 
-        Uses the cookies stored in the session's cookie jar (set by a prior
-        call to :meth:`async_login`) and adds the ``x-xsrf-token`` request
-        header whose value is read from the ``XSRF-TOKEN`` cookie.
-
-        Raises:
-            DhlApiError: If the server returns any status other than 200.
-            aiohttp.ClientError: On network-level failures.
-        """
-        xsrf_token = self._get_xsrf_token()
-        headers = {HEADER_XSRF: xsrf_token} if xsrf_token else {}
-
-        async with self._session.get(PARCELS_URL, headers=headers) as response:
-            if response.status != 200:
-                raise DhlApiError(response.status)
-
-            data: dict[str, Any] = await response.json()
-
-        return data.get("parcels", [])
+        return await self._async_call_with_reauth(_fetch)
 
     async def async_get_sent_shipments(self) -> list[dict[str, Any]]:
-        """Retrieve the sent shipments list from the DHL orders endpoint.
+        """Retrieve the sent shipments list, re-authenticating once on session expiry."""
+        async def _fetch() -> list[dict[str, Any]]:
+            headers = self._xsrf_headers()
+            async with self._session.get(SENT_SHIPMENTS_URL, headers=headers) as response:
+                if response.status != 200:
+                    raise DhlApiError(response.status)
+                data: list[dict[str, Any]] = await response.json()
+            return data if isinstance(data, list) else []
 
-        Uses the cookies stored in the session's cookie jar (set by a prior
-        call to :meth:`async_login`) and adds the ``x-xsrf-token`` request
-        header whose value is read from the ``XSRF-TOKEN`` cookie.
-
-        Raises:
-            DhlApiError: If the server returns any status other than 200.
-            aiohttp.ClientError: On network-level failures.
-        """
-        xsrf_token = self._get_xsrf_token()
-        headers = {HEADER_XSRF: xsrf_token} if xsrf_token else {}
-
-        async with self._session.get(
-            SENT_SHIPMENTS_URL, headers=headers
-        ) as response:
-            if response.status != 200:
-                raise DhlApiError(response.status)
-
-            data: list[dict[str, Any]] = await response.json()
-
-        return data if isinstance(data, list) else []
+        return await self._async_call_with_reauth(_fetch)
 
     @property
     def user_info(self) -> dict[str, Any] | None:
@@ -138,10 +118,24 @@ class DhlApiClient:
     # Private helpers
     # ------------------------------------------------------------------
 
-    def _get_xsrf_token(self) -> str | None:
-        """Extract the XSRF-TOKEN value from the session's cookie jar."""
-        cookie_jar = self._session.cookie_jar
-        for cookie in cookie_jar:
+    async def _async_call_with_reauth(self, coro_fn: Any) -> Any:
+        """Call coro_fn(), re-authenticating once if the session has expired.
+
+        A lock prevents concurrent re-login attempts when multiple coordinators
+        share this client instance and both hit a 401/403 at the same time.
+        """
+        try:
+            return await coro_fn()
+        except DhlApiError as err:
+            if err.status_code not in (401, 403):
+                raise
+        async with self._reauth_lock:
+            await self.async_login()
+        return await coro_fn()
+
+    def _xsrf_headers(self) -> dict[str, str]:
+        """Return the x-xsrf-token header dict, or empty dict if no token is present."""
+        for cookie in self._session.cookie_jar:
             if cookie.key == COOKIE_XSRF:
-                return cookie.value
-        return None
+                return {HEADER_XSRF: cookie.value}
+        return {}

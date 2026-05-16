@@ -296,44 +296,32 @@ class DhlNextDeliverySensor(CoordinatorEntity[DhlCoordinator], SensorEntity):
         self._attr_unique_id = f"{user_id}_next_delivery"
         self._attr_device_info = _build_device_info(user_info)
 
-    @property
-    def native_value(self) -> datetime | None:
-        """Return the earliest receivingTimeIndication.moment across active parcels.
-
-        Parses ISO 8601 strings and returns the minimum as a timezone-aware
-        datetime. Returns ``None`` if no parcels have a known delivery time.
-        """
-        moments: list[datetime] = []
+    def _delivery_moments(self) -> list[tuple[datetime, dict]]:
+        """Return (datetime, parcel) pairs for all parcels with a known delivery time."""
+        result: list[tuple[datetime, dict]] = []
         for parcel in self.coordinator.data or []:
-            indication = parcel.get("receivingTimeIndication") or {}
-            moment_str: str | None = indication.get("moment")
+            moment_str: str | None = (parcel.get("receivingTimeIndication") or {}).get("moment")
             if not moment_str:
                 continue
             try:
                 dt = datetime.fromisoformat(moment_str.replace("Z", "+00:00"))
                 if dt.tzinfo is None:
                     dt = dt.replace(tzinfo=timezone.utc)
-                moments.append(dt)
+                result.append((dt, parcel))
             except ValueError:
                 _LOGGER.debug("Could not parse delivery moment: %s", moment_str)
-        return min(moments) if moments else None
+        return result
+
+    @property
+    def native_value(self) -> datetime | None:
+        """Return the earliest expected delivery datetime across active parcels."""
+        moments = self._delivery_moments()
+        return min(dt for dt, _ in moments) if moments else None
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return the barcode and sender of the parcel with the earliest delivery."""
-        moments: list[tuple[datetime, dict]] = []
-        for parcel in self.coordinator.data or []:
-            indication = parcel.get("receivingTimeIndication") or {}
-            moment_str: str | None = indication.get("moment")
-            if not moment_str:
-                continue
-            try:
-                dt = datetime.fromisoformat(moment_str.replace("Z", "+00:00"))
-                if dt.tzinfo is None:
-                    dt = dt.replace(tzinfo=timezone.utc)
-                moments.append((dt, parcel))
-            except ValueError:
-                pass
+        moments = self._delivery_moments()
         if not moments:
             return {}
         _, earliest = min(moments, key=lambda x: x[0])

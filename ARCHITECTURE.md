@@ -69,10 +69,11 @@ DhlCoordinator      DhlSentShipmentsCoordinator
 - Uses the HA-managed `aiohttp.ClientSession` so cookies persist automatically
 - Extracts the `XSRF-TOKEN` cookie from the jar and adds it as a request header on each non-login call
 - Raises `DhlAuthError` on login failure, `DhlApiError` on other non-200 responses
+- Handles session re-authentication internally: `async_get_parcels` and `async_get_sent_shipments` retry once after a fresh login on HTTP 401/403; an `asyncio.Lock` prevents concurrent re-login attempts when both coordinators hit a 401 simultaneously
 
 ### `config_flow.py`
 - Implements the HA UI config flow (`async_step_user`)
-- Validates credentials by creating a temporary `aiohttp.ClientSession`, attempting login, then closing it
+- Validates credentials using the HA-managed shared session (`async_get_clientsession`) before saving
 - Sets the unique ID to the account email to prevent duplicate entries
 - Implements `async_step_reauth` / `async_step_reauth_confirm` for the HA re-auth flow
 
@@ -84,7 +85,7 @@ DhlCoordinator      DhlSentShipmentsCoordinator
 ### `coordinator.py`
 - `DhlCoordinator` — polls `async_get_parcels()`, applies `filter_active_parcels()` (excludes returns and non-active categories)
 - `DhlSentShipmentsCoordinator` — polls `async_get_sent_shipments()`, applies `filter_active_sent_shipments()` (keeps only `type == "outgoing"` and active categories)
-- Both coordinators re-authenticate once on HTTP 401/403 before raising `UpdateFailed`
+- Both coordinators raise `UpdateFailed` on any `DhlApiError` or `aiohttp.ClientError`; session recovery is handled by the client, not the coordinators
 
 ### `sensor.py`
 - `DhlPackagesSensor` — summary sensor for incoming parcels; also manages the lifecycle of `DhlParcelSensor` entities (creates new ones, removes stale ones from the entity registry on each coordinator update)
@@ -108,7 +109,7 @@ Outgoing shipments are exposed as a single sensor with a list attribute. This is
 Filtering (active categories, return exclusion) happens in the coordinator, not in the sensor. This keeps sensors simple and ensures the filtered data is the single source of truth for all entities.
 
 ### Session recovery
-Both coordinators catch `DhlApiError` with status 401/403 and call `async_login()` once before retrying. If the retry also fails, `UpdateFailed` is raised and HA marks the integration as unavailable until the next poll.
+Session recovery is handled entirely inside `DhlApiClient`. The `async_get_parcels` and `async_get_sent_shipments` methods retry once after a fresh `async_login()` call when they receive HTTP 401/403. An `asyncio.Lock` on the client ensures that when both coordinators hit a 401 at the same time, only one re-login occurs. If the retry also fails, a `DhlApiError` propagates up to the coordinator, which raises `UpdateFailed`, and HA marks the integration as unavailable until the next poll.
 
 ## hass.data structure
 

@@ -9,6 +9,7 @@ import voluptuous as vol
 
 from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
 from homeassistant.const import CONF_EMAIL, CONF_PASSWORD
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api import DhlApiClient, DhlAuthError
 from .const import DOMAIN
@@ -23,25 +24,16 @@ _USER_SCHEMA = vol.Schema(
 )
 
 
-async def _validate_credentials(email: str, password: str) -> None:
-    """Create a temporary session, attempt login, then close the session.
-
-    Raises:
-        DhlAuthError: If the credentials are rejected by the DHL API.
-        aiohttp.ClientError: If a network-level error occurs.
-    """
-    session = aiohttp.ClientSession()
-    try:
-        client = DhlApiClient(email, password, session)
-        await client.async_login()
-    finally:
-        await session.close()
-
-
-class DhlConfigFlow(ConfigFlow, domain="dhl_nl"):
+class DhlConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle the UI-driven configuration flow for the DHL integration."""
 
     VERSION = 1
+
+    async def _validate_credentials(self, email: str, password: str) -> None:
+        """Validate credentials against the live DHL API using the HA-managed session."""
+        session = async_get_clientsession(self.hass)
+        client = DhlApiClient(email, password, session)
+        await client.async_login()
 
     # ------------------------------------------------------------------
     # Initial setup step
@@ -58,7 +50,7 @@ class DhlConfigFlow(ConfigFlow, domain="dhl_nl"):
             password = user_input[CONF_PASSWORD]
 
             try:
-                await _validate_credentials(email, password)
+                await self._validate_credentials(email, password)
             except DhlAuthError:
                 errors["base"] = "invalid_auth"
             except aiohttp.ClientError:
@@ -86,7 +78,6 @@ class DhlConfigFlow(ConfigFlow, domain="dhl_nl"):
         self, entry_data: dict[str, Any]
     ) -> ConfigFlowResult:
         """Initiate re-authentication for an existing config entry."""
-        # Immediately proceed to the confirmation form.
         return await self.async_step_reauth_confirm()
 
     async def async_step_reauth_confirm(
@@ -100,18 +91,15 @@ class DhlConfigFlow(ConfigFlow, domain="dhl_nl"):
             password = user_input[CONF_PASSWORD]
 
             try:
-                await _validate_credentials(email, password)
+                await self._validate_credentials(email, password)
             except DhlAuthError:
                 errors["base"] = "invalid_auth"
             except aiohttp.ClientError:
                 errors["base"] = "cannot_connect"
             else:
-                # Retrieve the existing entry that triggered re-auth.
                 try:
                     reauth_entry = self._get_reauth_entry()
                 except AttributeError:
-                    # Fallback for older HA versions that don't have
-                    # _get_reauth_entry(); use the entry_id from context.
                     entry_id = self.context.get("entry_id")
                     reauth_entry = self.hass.config_entries.async_get_entry(entry_id)
 

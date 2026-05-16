@@ -52,38 +52,10 @@ class DhlCoordinator(DataUpdateCoordinator[list[dict]]):
         self._client = client
 
     async def _async_update_data(self) -> list[dict]:
-        """Fetch parcels from the DHL API, filter, and return active ones.
-
-        Re-authenticates once on HTTP 401/403 before retrying.
-
-        Raises:
-            UpdateFailed: On any API or network error that prevents a
-                          successful update.
-        """
         try:
             raw = await self._client.async_get_parcels()
-        except DhlApiError as err:
-            if err.status_code in (401, 403):
-                # Session expired — re-login once and retry.
-                try:
-                    await self._client.async_login()
-                    raw = await self._client.async_get_parcels()
-                except DhlApiError as retry_err:
-                    msg = f"DHL API error after re-auth: status {retry_err.status_code}"
-                    _LOGGER.error(msg)
-                    raise UpdateFailed(msg) from retry_err
-                except aiohttp.ClientError as retry_net_err:
-                    msg = f"DHL network error after re-auth: {retry_net_err}"
-                    _LOGGER.error(msg)
-                    raise UpdateFailed(msg) from retry_net_err
-            else:
-                msg = f"DHL API error: status {err.status_code}"
-                _LOGGER.error(msg)
-                raise UpdateFailed(msg) from err
-        except aiohttp.ClientError as net_err:
-            msg = f"DHL network error: {net_err}"
-            _LOGGER.error(msg)
-            raise UpdateFailed(msg) from net_err
+        except (DhlApiError, aiohttp.ClientError) as err:
+            raise UpdateFailed(f"DHL error: {err}") from err
 
         active = filter_active_parcels(raw)
         _LOGGER.debug(
@@ -111,37 +83,10 @@ class DhlSentShipmentsCoordinator(DataUpdateCoordinator[list[dict]]):
         self._client = client
 
     async def _async_update_data(self) -> list[dict]:
-        """Fetch sent shipments from the DHL API, filter, and return active ones.
-
-        Re-authenticates once on HTTP 401/403 before retrying.
-
-        Raises:
-            UpdateFailed: On any API or network error that prevents a
-                          successful update.
-        """
         try:
             raw = await self._client.async_get_sent_shipments()
-        except DhlApiError as err:
-            if err.status_code in (401, 403):
-                try:
-                    await self._client.async_login()
-                    raw = await self._client.async_get_sent_shipments()
-                except DhlApiError as retry_err:
-                    msg = f"DHL API error after re-auth (sent): status {retry_err.status_code}"
-                    _LOGGER.error(msg)
-                    raise UpdateFailed(msg) from retry_err
-                except aiohttp.ClientError as retry_net_err:
-                    msg = f"DHL network error after re-auth (sent): {retry_net_err}"
-                    _LOGGER.error(msg)
-                    raise UpdateFailed(msg) from retry_net_err
-            else:
-                msg = f"DHL API error (sent): status {err.status_code}"
-                _LOGGER.error(msg)
-                raise UpdateFailed(msg) from err
-        except aiohttp.ClientError as net_err:
-            msg = f"DHL network error (sent): {net_err}"
-            _LOGGER.error(msg)
-            raise UpdateFailed(msg) from net_err
+        except (DhlApiError, aiohttp.ClientError) as err:
+            raise UpdateFailed(f"DHL error (sent): {err}") from err
 
         active = filter_active_sent_shipments(raw)
         _LOGGER.debug(
