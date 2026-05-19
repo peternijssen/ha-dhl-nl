@@ -91,7 +91,8 @@ DhlCoordinator      DhlSentShipmentsCoordinator
 - `DhlPackagesSensor` — summary sensor for incoming parcels; also manages the lifecycle of `DhlParcelSensor` entities (creates new ones, removes stale ones from the entity registry on each coordinator update)
 - `DhlParcelSensor` — one entity per active incoming parcel, keyed by barcode
 - `DhlNextDeliverySensor` — derives the earliest `receivingTimeIndication.moment` across all active parcels; device class `TIMESTAMP` for native HA datetime handling
-- `DhlPickupPendingSensor` — counts active parcels where `destination.locationType == "SERVICEPOINT"` and status is not `COLLECTED_AT_PARCELSHOP`
+- `DhlEnRouteToServicePointSensor` — counts active parcels destined for a ServicePoint where status is not yet `NOTIFICATION_FOR_PARCELSHOP_COLLECTION_HAS_BEEN_SENT`
+- `DhlPickupPendingSensor` — counts active parcels at a ServicePoint with status `NOTIFICATION_FOR_PARCELSHOP_COLLECTION_HAS_BEEN_SENT`, meaning they have arrived and the recipient has been notified
 - `DhlSentShipmentsSensor` — single summary sensor for outgoing shipments; no per-shipment entities are created
 
 ## Key design decisions
@@ -131,6 +132,7 @@ hass.data["dhl_nl"] = {
 | `DhlIncomingParcelsSensor` | `{userId}_incoming_parcels` | `abc123_incoming_parcels` |
 | `DhlParcelSensor` | `{userId}_{barcode}` | `abc123_JUN491599949120274226025` |
 | `DhlNextDeliverySensor` | `{userId}_next_delivery` | `abc123_next_delivery` |
+| `DhlEnRouteToServicePointSensor` | `{userId}_en_route_to_service_point` | `abc123_en_route_to_service_point` |
 | `DhlPickupPendingSensor` | `{userId}_pickup_pending` | `abc123_pickup_pending` |
 | `DhlSentShipmentsSensor` | `{userId}_outgoing_parcels` | `abc123_outgoing_parcels` |
 

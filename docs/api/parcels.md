@@ -173,10 +173,9 @@ The `status` field is more granular than `category`. Observed values:
 |--------|-------------|
 | `DELIVERED` | Delivered at the door |
 | `DELIVERED_IN_MAILBOX` | Delivered in the mailbox |
+| `NOTIFICATION_FOR_PARCELSHOP_COLLECTION_HAS_BEEN_SENT` | Parcel has arrived at a DHL ServicePoint and the recipient has been notified for collection |
 | `COLLECTED_AT_PARCELSHOP` | Collected by the recipient at a ServicePoint |
 | `RETURN_DELIVERED_AT_SHIPPER_CALCULATED` | Return shipment delivered back to the original sender |
-
-Additional in-transit status values are expected but not yet observed in this dataset — see the `category` field for the active state groupings used by the integration.
 
 ## Categories
 
@@ -184,16 +183,23 @@ The `category` field is used by the integration to determine whether a parcel is
 
 | Category | Description |
 |----------|-------------|
-| `DELIVERED` | Terminal state — parcel is no longer tracked by the integration |
-| `CUSTOMS` | Being processed by customs |
-| `DATA_RECEIVED` | Shipment registered / label created |
-| `EXCEPTION` | Something went wrong, delay expected |
-| `IN_DELIVERY` | Parcel is in transit |
+| `CUSTOMS` | The shipment is being processed by customs |
+| `DATA_RECEIVED` | The shipment is registered |
+| `DELIVERED` | Delivered at door **or** DHL ServicePoint (see note below) |
+| `EXCEPTION` | Something in the process went wrong, delay is expected |
 | `INTERVENTION` | An intervention occurred in the delivery process |
-| `LEG` | Domestic leg registered (early trace event) |
+| `IN_DELIVERY` | The parcel is in transit |
+| `LEG` | Usually the start of a domestic delivery trace — shipment is registered |
 | `PROBLEM` | Same as `EXCEPTION` |
-| `UNDERWAY` | Parcel is being sorted |
-| `UNKNOWN` | Status unknown |
+| `UNDERWAY` | The parcel is being sorted |
+| `UNKNOWN` | The status of the parcel is unknown |
+
+> **ServicePoint lifecycle (confirmed from live data):**
+> 1. In transit to ServicePoint → category `IN_DELIVERY`, various statuses
+> 2. Arrived, recipient notified → category `IN_DELIVERY`, status `NOTIFICATION_FOR_PARCELSHOP_COLLECTION_HAS_BEEN_SENT`
+> 3. Collected → category `DELIVERED`, status `COLLECTED_AT_PARCELSHOP` — filtered out by the coordinator
+>
+> Despite DHL's documentation stating `DELIVERED` covers "door or ServicePoint", state 2 above (available at ServicePoint) retains category `IN_DELIVERY`. Only after collection does the category become `DELIVERED`.
 
 ## Filtering applied by the integration
 
@@ -201,6 +207,8 @@ The integration applies two filters before exposing parcels as sensors:
 
 1. `isReturn` must be `false` — return shipments are excluded from the incoming parcels sensor
 2. `category` must be in `ACTIVE_CATEGORIES` — parcels with `DELIVERED` category are excluded
+
+> **Note:** Parcels at a ServicePoint retain category `IN_DELIVERY` and are therefore included in the active set. The integration uses status `NOTIFICATION_FOR_PARCELSHOP_COLLECTION_HAS_BEEN_SENT` to distinguish arrived-at-ServicePoint parcels from those still in transit.
 
 ## Error handling
 

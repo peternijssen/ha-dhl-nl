@@ -82,15 +82,25 @@ trigger:
       {{ (as_timestamp(states('sensor.dhl_next_delivery')) - as_timestamp(now())) < 3600 }}
 ```
 
+#### `sensor.<account>_dhl_en_route_to_service_point`
+
+Shows how many parcels are still in transit to a DHL ServicePoint. A parcel is counted when its destination is a ServicePoint and its status is not yet `NOTIFICATION_FOR_PARCELSHOP_COLLECTION_HAS_BEEN_SENT`.
+
+| Attribute | Description |
+|-----------|-------------|
+| `parcels` | List of en-route parcels, each with `barcode`, `sender`, `service_point`, `service_point_address`, and `status` |
+
+**State:** number of parcels en route to a ServicePoint (unit: `parcels`)
+
 #### `sensor.<account>_dhl_parcels_awaiting_pickup`
 
-Shows how many parcels are waiting at a DHL ServicePoint to be collected. A parcel is counted when its destination is a ServicePoint and it has not yet been collected (`COLLECTED_AT_PARCELSHOP`).
+Shows how many parcels have arrived at a DHL ServicePoint and are ready to be collected. A parcel is counted when its destination is a ServicePoint and its status is `NOTIFICATION_FOR_PARCELSHOP_COLLECTION_HAS_BEEN_SENT`, meaning DHL has notified the recipient that the parcel is available for collection.
 
 | Attribute | Description |
 |-----------|-------------|
 | `parcels` | List of pending pickup parcels, each with `barcode`, `sender`, `pickup_location`, `pickup_address`, and `status` |
 
-**State:** number of parcels awaiting pickup (unit: `packages`)
+**State:** number of parcels awaiting pickup (unit: `parcels`)
 
 **Example automation:** send a notification when a parcel is ready for pickup:
 ```yaml
