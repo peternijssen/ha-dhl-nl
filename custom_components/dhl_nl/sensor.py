@@ -328,10 +328,22 @@ class DhlNextDeliverySensor(CoordinatorEntity[DhlCoordinator], SensorEntity):
         self._attr_device_info = _build_device_info(user_info)
 
     def _delivery_moments(self) -> list[tuple[datetime, dict]]:
-        """Return (datetime, parcel) pairs for all parcels with a known delivery time."""
+        """Return (datetime, parcel) pairs for all parcels with a known delivery time.
+
+        Handles two receivingTimeIndication types:
+        - MomentIndication: single ``moment`` timestamp
+        - IntervalIndication: ``start`` / ``end`` window; ``start`` is used
+        """
         result: list[tuple[datetime, dict]] = []
         for parcel in self.coordinator.data or []:
-            moment_str: str | None = (parcel.get("receivingTimeIndication") or {}).get("moment")
+            indication = parcel.get("receivingTimeIndication") or {}
+            indication_type = indication.get("indicationType")
+            if indication_type == "MomentIndication":
+                moment_str = indication.get("moment")
+            elif indication_type == "IntervalIndication":
+                moment_str = indication.get("start")
+            else:
+                continue
             if not moment_str:
                 continue
             try:

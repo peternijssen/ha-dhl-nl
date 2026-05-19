@@ -119,7 +119,7 @@ The `X-AUTH-TOKEN` and `XSRF-TOKEN` cookies set by the login endpoint must be pr
 | `receiver` | object | Recipient contact details. See [Contact object](#contact-object). |
 | `sender` | object | Sender contact details. See [Contact object](#contact-object). Often only `name` is populated. |
 | `origin` | object\|null | The DHL ServicePoint where a return was dropped off. `null` for regular deliveries. See [Location object](#location-object). |
-| `receivingTimeIndication` | object | Estimated or actual delivery moment. `moment` is an ISO 8601 timestamp; `indicationType` is always `"MomentIndication"`. |
+| `receivingTimeIndication` | object\|null | Estimated delivery time. Structure depends on `indicationType` — see [Receiving time indication](#receiving-time-indication). |
 | `barcode` | string | Shipment tracking barcode. Used as the unique identifier for per-parcel sensors. |
 | `intervenable` | boolean | Whether the delivery can still be redirected or modified. |
 | `isRegistered` | boolean | Whether the parcel is registered in the user's account. |
@@ -164,6 +164,29 @@ Used for `receiver` and `sender`.
 | `phone` | string\|null | Phone number. Format varies. |
 | `fax` | string\|null | Fax number. Always `null` in observed data. |
 | `contactName` | string\|null | Contact person name. Always `null` in observed data. |
+
+### Receiving time indication
+
+The `receivingTimeIndication` field can be `null` or one of two structures depending on `indicationType`:
+
+**`MomentIndication`** — a single point in time:
+```json
+{
+  "moment": "2026-05-07T10:19:48Z",
+  "indicationType": "MomentIndication"
+}
+```
+
+**`IntervalIndication`** — a delivery window:
+```json
+{
+  "start": "2026-05-20T08:00:00Z",
+  "end": "2026-05-20T16:00:00Z",
+  "indicationType": "IntervalIndication"
+}
+```
+
+The integration uses `moment` for `MomentIndication` and `start` for `IntervalIndication` when computing the next delivery datetime.
 
 ## Status values
 
