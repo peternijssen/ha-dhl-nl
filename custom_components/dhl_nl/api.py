@@ -42,8 +42,8 @@ class DhlApiClient:
         Args:
             email: DHL account e-mail address.
             password: DHL account password.
-            session: Shared aiohttp session whose cookie jar persists cookies
-                     between requests.
+            session: Dedicated aiohttp session with an isolated cookie jar,
+                     ensuring multiple DHL accounts do not share auth cookies.
         """
         self._email = email
         self._password = password

@@ -36,7 +36,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     Raises:
         ConfigEntryNotReady: If the initial login fails.
     """
-    session = async_get_clientsession(hass)
+    # Each config entry needs its own cookie jar so multiple DHL accounts
+    # don't overwrite each other's auth cookies in the shared session.
+    session = aiohttp.ClientSession(
+        connector=async_get_clientsession(hass).connector,
+        connector_owner=False,
+        cookie_jar=aiohttp.CookieJar(),
+    )
     client = DhlApiClient(
         entry.data[CONF_EMAIL],
         entry.data[CONF_PASSWORD],
@@ -56,6 +62,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "coordinator": coordinator,
         "sent_coordinator": sent_coordinator,
         "user_info": user_info,
+        "session": session,
     }
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
@@ -77,5 +84,6 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unload_ok:
-        hass.data[DOMAIN].pop(entry.entry_id)
+        data = hass.data[DOMAIN].pop(entry.entry_id)
+        await data["session"].close()
     return unload_ok
