@@ -5,7 +5,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Any
 
-from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
+from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, SensorStateClass
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
@@ -124,6 +124,7 @@ class DhlIncomingParcelsSensor(CoordinatorEntity[DhlCoordinator], SensorEntity):
     _attr_name = "DHL Incoming Parcels"
     _attr_icon = "mdi:package-variant-closed"
     _attr_native_unit_of_measurement = "parcels"
+    _attr_state_class = SensorStateClass.MEASUREMENT
 
     def __init__(
         self,
@@ -255,6 +256,7 @@ class DhlSentShipmentsSensor(
     _attr_name = "DHL Outgoing Parcels"
     _attr_icon = "mdi:package-variant-closed"
     _attr_native_unit_of_measurement = "parcels"
+    _attr_state_class = SensorStateClass.MEASUREMENT
 
     def __init__(
         self,
@@ -373,6 +375,7 @@ class DhlEnRouteToServicePointSensor(CoordinatorEntity[DhlCoordinator], SensorEn
     _attr_name = "DHL Parcels En Route to ServicePoint"
     _attr_icon = "mdi:truck-delivery"
     _attr_native_unit_of_measurement = "parcels"
+    _attr_state_class = SensorStateClass.MEASUREMENT
 
     def __init__(
         self,
@@ -425,6 +428,7 @@ class DhlPickupPendingSensor(CoordinatorEntity[DhlCoordinator], SensorEntity):
     _attr_name = "DHL Parcels Awaiting Pickup"
     _attr_icon = "mdi:store-clock"
     _attr_native_unit_of_measurement = "parcels"
+    _attr_state_class = SensorStateClass.MEASUREMENT
 
     def __init__(
         self,
