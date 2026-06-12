@@ -35,10 +35,8 @@ _DELIVERED_SCHEMA = vol.Schema(
     {
         vol.Required(CONF_DELIVERED_FILTER_TYPE, default=DEFAULT_DELIVERED_FILTER_TYPE): selector.SelectSelector(
             selector.SelectSelectorConfig(
-                options=[
-                    selector.SelectOptionDict(value="days", label="Days"),
-                    selector.SelectOptionDict(value="parcels", label="Number of parcels"),
-                ],
+                options=["days", "parcels"],
+                translation_key=CONF_DELIVERED_FILTER_TYPE,
                 mode=selector.SelectSelectorMode.LIST,
             )
         ),
