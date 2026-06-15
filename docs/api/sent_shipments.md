@@ -168,3 +168,7 @@ The integration applies two filters before exposing shipments in the sensor:
 | `200` | Success |
 | `401` / `403` | Session expired — the integration re-authenticates and retries once |
 | `4xx` / `5xx` | Other failure — raises `DhlApiError` with the status code |
+
+## How the integration exposes shipments
+
+Each surviving shipment goes through the same `normalize_parcel` helper as incoming parcels. Field mapping is identical to [parcels.md → How the integration exposes parcels](parcels.md#how-the-integration-exposes-parcels). Note that `sender.name` for sent shipments is the **account holder** (you, the sender), not a remote shipper — read `raw.receiver.name` if you need the recipient.

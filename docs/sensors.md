@@ -2,6 +2,8 @@
 
 Full reference for all sensors provided by the DHL NL integration.
 
+> **Parcel shape:** every parcel exposed on a sensor attribute carries the carrier-agnostic top-level keys `carrier`, `barcode`, `sender`, `status`, `delivered`, `delivered_at`, `planned_from`, `planned_to`, `pickup`, `pickup_point`, `url`, plus the original DHL payload under `raw`. See [docs/api/parcels.md → How the integration exposes parcels](api/parcels.md#how-the-integration-exposes-parcels) for the source mapping.
+
 ## Incoming parcels
 
 ### `sensor.<account>_dhl_incoming_parcels`
@@ -20,7 +22,7 @@ One sensor per active incoming shipment. Created automatically when a new parcel
 
 **State:** parcel status string (e.g. `IN_DELIVERY`, `UNDERWAY`)
 
-**Attributes:** all fields returned by the DHL API for that parcel, including barcode, estimated delivery, address, and event history.
+**Attributes:** the full normalized parcel dict (top-level fields plus `raw`).
 
 ### `sensor.<account>_dhl_next_delivery`
 
@@ -50,7 +52,7 @@ Parcels still in transit to a DHL ServicePoint (status is not yet `NOTIFICATION_
 
 | Attribute | Description |
 |-----------|-------------|
-| `parcels` | List of en-route parcels, each with `barcode`, `sender`, `service_point`, `service_point_address`, and `status` |
+| `parcels` | List of normalized en-route parcels (full shape including `raw`) |
 
 ### `sensor.<account>_dhl_parcels_awaiting_pickup`
 
@@ -60,7 +62,7 @@ Parcels that have arrived at a DHL ServicePoint and are ready to be collected (s
 
 | Attribute | Description |
 |-----------|-------------|
-| `parcels` | List of pending pickup parcels, each with `barcode`, `sender`, `pickup_location`, `pickup_address`, and `status` |
+| `parcels` | List of normalized parcels awaiting pickup (full shape including `raw` — `raw.destination` has the ServicePoint address) |
 
 **Example automation:** send a notification when a parcel is ready for pickup:
 
@@ -83,7 +85,7 @@ Recently delivered incoming parcels. The number of parcels shown is controlled b
 
 | Attribute | Description |
 |-----------|-------------|
-| `parcels` | List of delivered parcels, each with `barcode`, `sender`, `status`, and `delivery_date` |
+| `parcels` | List of normalized delivered parcels (full shape including `raw`) |
 
 ---
 
@@ -110,7 +112,7 @@ Summary sensor showing how many packages you have sent that are still in transit
 
 | Attribute | Description |
 |-----------|-------------|
-| `shipments` | List of active outgoing shipment objects, each containing `barcode`, `orderId`, `status`, `category`, `receiver`, `destination`, `timeCreated`, and `receivingTimeIndication` |
+| `shipments` | List of normalized active outgoing shipments (full shape including `raw` — DHL-specific fields like `orderId`, `receiver`, `destination`, `timeCreated`, `totalPrice` live under `raw`) |
 
 ---
 
@@ -134,7 +136,7 @@ Both incoming and outgoing sensors only track shipments in the following categor
 
 ## Poll interval
 
-Data is refreshed every **30 minutes**. You can trigger a manual refresh from the integration's device page using the **Reload** option.
+Data is refreshed every **15 minutes**. You can trigger a manual refresh from the integration's device page using the **Reload** option.
 
 ---
 

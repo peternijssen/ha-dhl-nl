@@ -284,22 +284,7 @@ class DhlSentShipmentsSensor(
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return the full list of active sent shipments as an attribute."""
-        shipments = self.coordinator.data or []
-        return {
-            "shipments": [
-                {
-                    "barcode": s.get("barcode"),
-                    "orderId": s.get("orderId"),
-                    "status": s.get("status"),
-                    "category": s.get("category"),
-                    "receiver": s.get("receiver"),
-                    "destination": s.get("destination"),
-                    "timeCreated": s.get("timeCreated"),
-                    "receivingTimeIndication": s.get("receivingTimeIndication"),
-                }
-                for s in shipments
-            ]
-        }
+        return {"shipments": self.coordinator.data or []}
 
 
 class DhlNextDeliverySensor(CoordinatorEntity[DhlCoordinator], SensorEntity):
@@ -330,22 +315,10 @@ class DhlNextDeliverySensor(CoordinatorEntity[DhlCoordinator], SensorEntity):
         self._attr_device_info = _build_device_info(user_info)
 
     def _delivery_moments(self) -> list[tuple[datetime, dict]]:
-        """Return (datetime, parcel) pairs for all parcels with a known delivery time.
-
-        Handles two receivingTimeIndication types:
-        - MomentIndication: single ``moment`` timestamp
-        - IntervalIndication: ``start`` / ``end`` window; ``start`` is used
-        """
+        """Return (datetime, parcel) pairs for parcels with a known ``planned_from``."""
         result: list[tuple[datetime, dict]] = []
         for parcel in self.coordinator.data or []:
-            indication = parcel.get("receivingTimeIndication") or {}
-            indication_type = indication.get("indicationType")
-            if indication_type == "MomentIndication":
-                moment_str = indication.get("moment")
-            elif indication_type == "IntervalIndication":
-                moment_str = indication.get("start")
-            else:
-                continue
+            moment_str = parcel.get("planned_from")
             if not moment_str:
                 continue
             try:
@@ -370,10 +343,9 @@ class DhlNextDeliverySensor(CoordinatorEntity[DhlCoordinator], SensorEntity):
         if not moments:
             return {}
         _, earliest = min(moments, key=lambda x: x[0])
-        sender = earliest.get("sender") or {}
         return {
             "barcode": earliest.get("barcode"),
-            "sender": sender.get("name"),
+            "sender": earliest.get("sender"),
         }
 
 
@@ -406,7 +378,7 @@ class DhlEnRouteToServicePointSensor(CoordinatorEntity[DhlCoordinator], SensorEn
         """Return active parcels still in transit to a ServicePoint."""
         return [
             p for p in (self.coordinator.data or [])
-            if (p.get("destination") or {}).get("locationType") == "SERVICEPOINT"
+            if p.get("pickup")
             and p.get("status") != STATUS_AT_SERVICE_POINT
         ]
 
@@ -416,19 +388,7 @@ class DhlEnRouteToServicePointSensor(CoordinatorEntity[DhlCoordinator], SensorEn
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        parcels = self._get_en_route_parcels()
-        return {
-            "parcels": [
-                {
-                    "barcode": p.get("barcode"),
-                    "sender": (p.get("sender") or {}).get("name"),
-                    "service_point": (p.get("destination") or {}).get("name"),
-                    "service_point_address": (p.get("destination") or {}).get("address"),
-                    "status": p.get("status"),
-                }
-                for p in parcels
-            ]
-        }
+        return {"parcels": self._get_en_route_parcels()}
 
 
 class DhlPickupPendingSensor(CoordinatorEntity[DhlCoordinator], SensorEntity):
@@ -460,7 +420,7 @@ class DhlPickupPendingSensor(CoordinatorEntity[DhlCoordinator], SensorEntity):
         """Return parcels that have arrived at a ServicePoint and are ready for collection."""
         return [
             p for p in (self.coordinator.data or [])
-            if (p.get("destination") or {}).get("locationType") == "SERVICEPOINT"
+            if p.get("pickup")
             and p.get("status") == STATUS_AT_SERVICE_POINT
         ]
 
@@ -472,19 +432,7 @@ class DhlPickupPendingSensor(CoordinatorEntity[DhlCoordinator], SensorEntity):
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return details of each parcel awaiting pickup."""
-        parcels = self._get_pickup_parcels()
-        return {
-            "parcels": [
-                {
-                    "barcode": p.get("barcode"),
-                    "sender": (p.get("sender") or {}).get("name"),
-                    "pickup_location": (p.get("destination") or {}).get("name"),
-                    "pickup_address": (p.get("destination") or {}).get("address"),
-                    "status": p.get("status"),
-                }
-                for p in parcels
-            ]
-        }
+        return {"parcels": self._get_pickup_parcels()}
 
 
 class DhlDeliveredParcelsSensor(CoordinatorEntity[DhlCoordinator], SensorEntity):
@@ -512,14 +460,4 @@ class DhlDeliveredParcelsSensor(CoordinatorEntity[DhlCoordinator], SensorEntity)
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        return {
-            "parcels": [
-                {
-                    "barcode": p.get("barcode"),
-                    "sender": (p.get("sender") or {}).get("name"),
-                    "status": p.get("status"),
-                    "delivery_date": (p.get("receivingTimeIndication") or {}).get("moment"),
-                }
-                for p in self.coordinator.delivered
-            ]
-        }
+        return {"parcels": self.coordinator.delivered}

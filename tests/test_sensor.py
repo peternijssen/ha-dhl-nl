@@ -5,6 +5,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from custom_components.dhl_nl.const import STATUS_AT_SERVICE_POINT
+from custom_components.dhl_nl.coordinator import normalize_parcel
 from custom_components.dhl_nl.sensor import (
     DhlDeliveredParcelsSensor,
     DhlEnRouteToServicePointSensor,
@@ -28,15 +29,16 @@ def _parcel(
     status: str = "IN_DELIVERY",
     location_type: str = "ADDRESS",
     indication: dict | None = None,
+    category: str = "IN_DELIVERY",
 ) -> dict:
-    return {
+    return normalize_parcel({
         "barcode": barcode,
         "status": status,
-        "category": "IN_DELIVERY",
+        "category": category,
         "destination": {"locationType": location_type, "name": "DHL ServicePoint"},
         "sender": {"name": "Example Sender"},
         "receivingTimeIndication": indication,
-    }
+    })
 
 
 # ---------------------------------------------------------------------------
@@ -167,14 +169,14 @@ def test_pickup_pending_zero_when_no_parcels():
 
 
 def _delivered_parcel(barcode: str = "DEL123") -> dict:
-    return {
+    return normalize_parcel({
         "barcode": barcode,
         "category": "DELIVERED",
         "isReturn": False,
         "status": "DELIVERED",
         "sender": {"name": "Test Sender"},
         "receivingTimeIndication": {"indicationType": "MomentIndication", "moment": "2026-05-30T14:00:00Z"},
-    }
+    })
 
 
 def test_delivered_sensor_count_matches_coordinator_delivered():
@@ -205,8 +207,14 @@ def test_delivered_sensor_attributes_include_sender():
 
 
 def test_delivered_sensor_attributes_handle_missing_sender():
-    parcel = _delivered_parcel()
-    parcel["sender"] = None
+    parcel = normalize_parcel({
+        "barcode": "DEL123",
+        "category": "DELIVERED",
+        "isReturn": False,
+        "status": "DELIVERED",
+        "sender": None,
+        "receivingTimeIndication": {"indicationType": "MomentIndication", "moment": "2026-05-30T14:00:00Z"},
+    })
     sensor = DhlDeliveredParcelsSensor(_make_coordinator([], [parcel]), USER_INFO)
     attrs = sensor.extra_state_attributes
     assert attrs["parcels"][0]["sender"] is None

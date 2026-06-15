@@ -25,6 +25,41 @@ from .const import (
 _LOGGER = logging.getLogger(__name__)
 
 
+def _delivery_window(parcel: dict) -> tuple[str | None, str | None]:
+    """Return (from, to) ISO 8601 strings from receivingTimeIndication."""
+    indication = parcel.get("receivingTimeIndication") or {}
+    indication_type = indication.get("indicationType")
+    if indication_type == "MomentIndication":
+        return indication.get("moment"), None
+    if indication_type == "IntervalIndication":
+        return indication.get("start"), indication.get("end")
+    return None, None
+
+
+def normalize_parcel(parcel: dict) -> dict:
+    """Return a carrier-agnostic parcel dict with the original DHL payload under ``raw``."""
+    sender = parcel.get("sender") or {}
+    destination = parcel.get("destination") or {}
+    delivered = parcel.get("category") == "DELIVERED"
+    moment_from, moment_to = _delivery_window(parcel)
+    is_pickup = destination.get("locationType") == "SERVICEPOINT"
+
+    return {
+        "carrier": "DHL",
+        "barcode": parcel.get("barcode"),
+        "sender": sender.get("name"),
+        "status": parcel.get("status"),
+        "delivered": delivered,
+        "delivered_at": moment_from if delivered else None,
+        "planned_from": None if delivered else moment_from,
+        "planned_to": None if delivered else moment_to,
+        "pickup": is_pickup,
+        "pickup_point": destination.get("name") if is_pickup else None,
+        "url": None,
+        "raw": parcel,
+    }
+
+
 def filter_active_parcels(parcels: list[dict]) -> list[dict]:
     """Return only active incoming parcels (not returns, in an active category)."""
     return [
@@ -77,17 +112,19 @@ class DhlCoordinator(DataUpdateCoordinator[list[dict]]):
         try:
             raw = await self._client.async_get_parcels()
         except DhlAuthError as err:
+            _LOGGER.error("DHL authentication failed: %s", err)
             raise ConfigEntryAuthFailed("DHL authentication failed") from err
         except (DhlApiError, aiohttp.ClientError) as err:
             raise UpdateFailed(f"DHL error: {err}") from err
 
         active = filter_active_parcels(raw)
-        self.delivered = self._apply_delivered_filter(filter_delivered_parcels(raw))
+        delivered = self._apply_delivered_filter(filter_delivered_parcels(raw))
         _LOGGER.debug(
             "DHL parcels fetched: %d total, %d active, %d delivered",
-            len(raw), len(active), len(self.delivered),
+            len(raw), len(active), len(delivered),
         )
-        return active
+        self.delivered = [normalize_parcel(p) for p in delivered]
+        return [normalize_parcel(p) for p in active]
 
     def _apply_delivered_filter(self, parcels: list[dict]) -> list[dict]:
         """Apply the configured filter to the delivered parcels list."""
@@ -144,6 +181,7 @@ class DhlSentShipmentsCoordinator(DataUpdateCoordinator[list[dict]]):
         try:
             raw = await self._client.async_get_sent_shipments()
         except DhlAuthError as err:
+            _LOGGER.error("DHL authentication failed: %s", err)
             raise ConfigEntryAuthFailed("DHL authentication failed") from err
         except (DhlApiError, aiohttp.ClientError) as err:
             raise UpdateFailed(f"DHL error (sent): {err}") from err
@@ -152,4 +190,4 @@ class DhlSentShipmentsCoordinator(DataUpdateCoordinator[list[dict]]):
         _LOGGER.debug(
             "DHL sent shipments fetched: %d total, %d active", len(raw), len(active)
         )
-        return active
+        return [normalize_parcel(s) for s in active]

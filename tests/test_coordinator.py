@@ -15,6 +15,7 @@ from custom_components.dhl_nl.coordinator import (
     filter_active_parcels,
     filter_active_sent_shipments,
     filter_delivered_parcels,
+    normalize_parcel,
 )
 
 
@@ -202,7 +203,96 @@ async def test_coordinator_returns_only_active_parcels(hass):
     result = await coordinator._async_update_data()
 
     assert len(result) == 1
-    assert result[0]["category"] == "IN_DELIVERY"
+    assert result[0]["raw"]["category"] == "IN_DELIVERY"
+    assert result[0]["carrier"] == "DHL"
+
+
+# ---------------------------------------------------------------------------
+# normalize_parcel
+# ---------------------------------------------------------------------------
+
+
+def test_normalize_active_with_moment_indication():
+    parcel = {
+        "barcode": "ABC",
+        "category": "IN_DELIVERY",
+        "status": "IN_DELIVERY",
+        "sender": {"name": "Test Sender"},
+        "destination": {"locationType": "ADDRESS", "name": "Home"},
+        "receivingTimeIndication": {
+            "indicationType": "MomentIndication",
+            "moment": "2026-06-15T14:00:00+02:00",
+        },
+    }
+    result = normalize_parcel(parcel)
+    assert result["carrier"] == "DHL"
+    assert result["barcode"] == "ABC"
+    assert result["sender"] == "Test Sender"
+    assert result["delivered"] is False
+    assert result["delivered_at"] is None
+    assert result["planned_from"] == "2026-06-15T14:00:00+02:00"
+    assert result["planned_to"] is None
+    assert result["pickup"] is False
+    assert result["pickup_point"] is None
+    assert result["raw"] == parcel
+
+
+def test_normalize_active_with_interval_indication():
+    parcel = {
+        "barcode": "ABC",
+        "category": "IN_DELIVERY",
+        "destination": {"locationType": "ADDRESS"},
+        "receivingTimeIndication": {
+            "indicationType": "IntervalIndication",
+            "start": "2026-06-15T14:00:00+02:00",
+            "end": "2026-06-15T16:00:00+02:00",
+        },
+    }
+    result = normalize_parcel(parcel)
+    assert result["planned_from"] == "2026-06-15T14:00:00+02:00"
+    assert result["planned_to"] == "2026-06-15T16:00:00+02:00"
+
+
+def test_normalize_delivered_sets_delivered_at_not_planned():
+    parcel = {
+        "barcode": "ABC",
+        "category": "DELIVERED",
+        "destination": {"locationType": "ADDRESS"},
+        "receivingTimeIndication": {
+            "indicationType": "MomentIndication",
+            "moment": "2026-06-15T14:00:00+02:00",
+        },
+    }
+    result = normalize_parcel(parcel)
+    assert result["delivered"] is True
+    assert result["delivered_at"] == "2026-06-15T14:00:00+02:00"
+    assert result["planned_from"] is None
+    assert result["planned_to"] is None
+
+
+def test_normalize_pickup_point():
+    parcel = {
+        "barcode": "ABC",
+        "category": "IN_DELIVERY",
+        "destination": {"locationType": "SERVICEPOINT", "name": "Albert Heijn Centrum"},
+    }
+    result = normalize_parcel(parcel)
+    assert result["pickup"] is True
+    assert result["pickup_point"] == "Albert Heijn Centrum"
+
+
+def test_normalize_handles_missing_fields():
+    result = normalize_parcel({})
+    assert result["carrier"] == "DHL"
+    assert result["barcode"] is None
+    assert result["sender"] is None
+    assert result["pickup"] is False
+    assert result["pickup_point"] is None
+
+
+# ---------------------------------------------------------------------------
+# Coordinator data-flow
+# ---------------------------------------------------------------------------
 
 
 async def test_coordinator_populates_delivered(hass):
@@ -218,4 +308,4 @@ async def test_coordinator_populates_delivered(hass):
     await coordinator._async_update_data()
 
     assert len(coordinator.delivered) == 1
-    assert coordinator.delivered[0]["category"] == "DELIVERED"
+    assert coordinator.delivered[0]["raw"]["category"] == "DELIVERED"

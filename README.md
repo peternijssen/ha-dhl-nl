@@ -49,6 +49,8 @@ A custom Home Assistant integration that tracks your incoming and outgoing DHL e
 | `sensor.<account>_dhl_delivered_parcels` | Recently delivered parcels (configurable window) |
 | `sensor.<account>_dhl_outgoing_parcels` | Number of active outgoing shipments |
 
+Every parcel exposed on a sensor attribute uses a carrier-agnostic shape — top-level keys are `carrier`, `barcode`, `sender`, `status`, `delivered`, `delivered_at`, `planned_from`, `planned_to`, `pickup`, `pickup_point`, `url`. The original DHL API payload is preserved under `raw` for anyone who needs it. This lets the [parcel aggregator](https://github.com/peternijssen/ha-parcel-aggregator) and any cross-carrier dashboard read parcels from DHL, PostNL and DPD the same way.
+
 For full attribute reference, active status categories, and example automations see [docs/sensors.md](docs/sensors.md).
 
 ## Example dashboard card
