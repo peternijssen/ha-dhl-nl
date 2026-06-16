@@ -144,18 +144,12 @@ class DhlConfigFlow(ConfigFlow, domain=DOMAIN):
             except aiohttp.ClientError:
                 errors["base"] = "cannot_connect"
             else:
-                try:
-                    reauth_entry = self._get_reauth_entry()
-                except AttributeError:
-                    entry_id = self.context.get("entry_id")
-                    reauth_entry = self.hass.config_entries.async_get_entry(entry_id)
-
-                if reauth_entry is not None:
-                    self.hass.config_entries.async_update_entry(
-                        reauth_entry,
-                        data={CONF_EMAIL: email, CONF_PASSWORD: password},
-                    )
-
+                reauth_entry = self._get_reauth_entry()
+                self.hass.config_entries.async_update_entry(
+                    reauth_entry,
+                    data={CONF_EMAIL: email, CONF_PASSWORD: password},
+                )
+                await self.hass.config_entries.async_reload(reauth_entry.entry_id)
                 return self.async_abort(reason="reauth_successful")
 
         return self.async_show_form(

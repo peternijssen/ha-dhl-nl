@@ -77,8 +77,10 @@ class DhlCoordinator(DataUpdateCoordinator[list[dict]]):
         try:
             raw = await self._client.async_get_parcels()
         except DhlAuthError as err:
+            _LOGGER.error("DHL authentication failed: %s", err)
             raise ConfigEntryAuthFailed("DHL authentication failed") from err
         except (DhlApiError, aiohttp.ClientError) as err:
+            _LOGGER.warning("DHL parcels endpoint unreachable: %s", err)
             raise UpdateFailed(f"DHL error: {err}") from err
 
         active = filter_active_parcels(raw)
@@ -144,8 +146,10 @@ class DhlSentShipmentsCoordinator(DataUpdateCoordinator[list[dict]]):
         try:
             raw = await self._client.async_get_sent_shipments()
         except DhlAuthError as err:
+            _LOGGER.error("DHL authentication failed: %s", err)
             raise ConfigEntryAuthFailed("DHL authentication failed") from err
         except (DhlApiError, aiohttp.ClientError) as err:
+            _LOGGER.warning("DHL sent shipments endpoint unreachable: %s", err)
             raise UpdateFailed(f"DHL error (sent): {err}") from err
 
         active = filter_active_sent_shipments(raw)
