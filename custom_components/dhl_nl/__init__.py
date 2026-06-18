@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
+from typing import Any
 
 import aiohttp
 
@@ -12,30 +14,28 @@ from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api import DhlApiClient, DhlAuthError
-from .const import DOMAIN, PLATFORMS
+from .const import PLATFORMS
 from .coordinator import DhlCoordinator, DhlSentShipmentsCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
 
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Set up DHL from a config entry.
+@dataclass
+class DhlData:
+    """Runtime data attached to a DHL config entry."""
 
-    Obtains the HA-managed aiohttp session, instantiates the API client,
-    performs the initial login, and wires up the coordinator.  If login
-    fails for any reason (auth or network) ``ConfigEntryNotReady`` is raised
-    so that Home Assistant will retry setup automatically.
+    client: DhlApiClient
+    coordinator: DhlCoordinator
+    sent_coordinator: DhlSentShipmentsCoordinator
+    user_info: dict[str, Any]
+    session: aiohttp.ClientSession
 
-    Args:
-        hass: The Home Assistant instance.
-        entry: The config entry being set up.
 
-    Returns:
-        ``True`` on success.
+type DhlConfigEntry = ConfigEntry[DhlData]
 
-    Raises:
-        ConfigEntryNotReady: If the initial login fails.
-    """
+
+async def async_setup_entry(hass: HomeAssistant, entry: DhlConfigEntry) -> bool:
+    """Set up DHL from a config entry."""
     # Each config entry needs its own cookie jar so multiple DHL accounts
     # don't overwrite each other's auth cookies in the shared session.
     session = aiohttp.ClientSession(
@@ -60,13 +60,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     coordinator = DhlCoordinator(hass, client, entry)
     sent_coordinator = DhlSentShipmentsCoordinator(hass, client)
 
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
-        "client": client,
-        "coordinator": coordinator,
-        "sent_coordinator": sent_coordinator,
-        "user_info": user_info,
-        "session": session,
-    }
+    entry.runtime_data = DhlData(
+        client=client,
+        coordinator=coordinator,
+        sent_coordinator=sent_coordinator,
+        user_info=user_info,
+        session=session,
+    )
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
@@ -75,27 +75,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return True
 
 
-async def _async_update_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
+async def _async_update_options(hass: HomeAssistant, entry: DhlConfigEntry) -> None:
     """Refresh the coordinator immediately when options are changed."""
-    coordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
-    await coordinator.async_request_refresh()
+    await entry.runtime_data.coordinator.async_request_refresh()
 
 
-async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Unload a DHL config entry.
-
-    Unloads all platforms and removes the entry's data from
-    ``hass.data[DOMAIN]``.
-
-    Args:
-        hass: The Home Assistant instance.
-        entry: The config entry being unloaded.
-
-    Returns:
-        ``True`` if all platforms were unloaded successfully.
-    """
-    unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
-    if unload_ok:
-        data = hass.data[DOMAIN].pop(entry.entry_id)
-        await data["session"].close()
-    return unload_ok
+async def async_unload_entry(hass: HomeAssistant, entry: DhlConfigEntry) -> bool:
+    """Unload a DHL config entry."""
+    if await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
+        await entry.runtime_data.session.close()
+        return True
+    return False

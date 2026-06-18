@@ -6,7 +6,6 @@ from datetime import datetime, timezone
 from typing import Any
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, SensorStateClass
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity import DeviceInfo
@@ -14,15 +13,20 @@ from homeassistant.helpers.device_registry import DeviceEntryType
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
+from . import DhlConfigEntry
 from .const import DOMAIN, STATUS_AT_SERVICE_POINT
 from .coordinator import DhlCoordinator, DhlSentShipmentsCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
+# The DataUpdateCoordinator handles fan-out to all entities; HA's per-entity
+# update throttling adds nothing here.
+PARALLEL_UPDATES = 0
+
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: ConfigEntry,
+    entry: DhlConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up DHL sensor entities from a config entry.
@@ -31,10 +35,10 @@ async def async_setup_entry(
     - A summary sensor for incoming active parcels, plus one per-parcel sensor
     - A summary sensor for outgoing active shipments
     """
-    data = hass.data[DOMAIN][entry.entry_id]
-    coordinator: DhlCoordinator = data["coordinator"]
-    sent_coordinator: DhlSentShipmentsCoordinator = data["sent_coordinator"]
-    user_info: dict[str, Any] = data["user_info"]
+    data = entry.runtime_data
+    coordinator = data.coordinator
+    sent_coordinator = data.sent_coordinator
+    user_info = data.user_info
 
     # Perform the first refresh for both coordinators before adding entities.
     await coordinator.async_config_entry_first_refresh()
@@ -118,15 +122,17 @@ def _build_device_info(user_info: dict[str, Any]) -> DeviceInfo:
 class DhlIncomingParcelsSensor(CoordinatorEntity[DhlCoordinator], SensorEntity):
     """Summary sensor reporting the count of active incoming DHL parcels.
 
-    Also manages the lifecycle of per-parcel :class:`DhlParcelSensor`
-    entities: new barcodes are added and stale barcodes are removed from
-    the entity registry whenever the coordinator data changes.
+    Spawns a per-parcel :class:`DhlParcelSensor` whenever a new barcode
+    appears. Stale per-parcel sensors remove themselves once their barcode
+    drops out of the coordinator data — see ``DhlParcelSensor``.
     """
 
     _attr_name = "DHL Incoming Parcels"
     _attr_icon = "mdi:package-variant-closed"
     _attr_native_unit_of_measurement = "parcels"
     _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_attribution = "Data provided by DHL"
+    _unrecorded_attributes = frozenset({"parcels"})
 
     def __init__(
         self,
@@ -163,41 +169,23 @@ class DhlIncomingParcelsSensor(CoordinatorEntity[DhlCoordinator], SensorEntity):
     # ------------------------------------------------------------------
 
     def _handle_coordinator_update(self) -> None:
-        """Reconcile per-parcel sensors and trigger a state write."""
-        current_parcels: list[dict] = self.coordinator.data or []
+        """Spawn per-parcel sensors for new barcodes and trigger a state write."""
         current_barcodes: set[str] = {
-            p.get("barcode", "") for p in current_parcels
+            p.get("barcode", "") for p in (self.coordinator.data or [])
         }
 
-        # Add sensors for barcodes that are new.
         new_barcodes = current_barcodes - self._known_barcodes
         if new_barcodes:
-            new_entities = [
+            self._async_add_entities(
                 DhlParcelSensor(
                     coordinator=self.coordinator,
                     user_info=self._user_info,
                     barcode=barcode,
                 )
                 for barcode in new_barcodes
-            ]
-            self._async_add_entities(new_entities)
-
-        # Remove sensors for barcodes that are no longer active.
-        stale_barcodes = self._known_barcodes - current_barcodes
-        if stale_barcodes and self.hass is not None:
-            registry = er.async_get(self.hass)
-            user_id: str = self._user_info.get("userId", "")
-            for barcode in stale_barcodes:
-                unique_id = f"{user_id}_{barcode}"
-                entity_id = registry.async_get_entity_id(
-                    "sensor", DOMAIN, unique_id
-                )
-                if entity_id:
-                    registry.async_remove(entity_id)
+            )
 
         self._known_barcodes = current_barcodes
-
-        # Trigger the normal HA state write.
         super()._handle_coordinator_update()
 
 
@@ -205,6 +193,7 @@ class DhlParcelSensor(CoordinatorEntity[DhlCoordinator], SensorEntity):
     """Per-parcel sensor reporting the status of a single incoming DHL shipment."""
 
     _attr_icon = "mdi:package-variant-closed"
+    _attr_attribution = "Data provided by DHL"
 
     def __init__(
         self,
@@ -244,6 +233,13 @@ class DhlParcelSensor(CoordinatorEntity[DhlCoordinator], SensorEntity):
         parcel = self._get_parcel()
         return dict(parcel) if parcel else {}
 
+    def _handle_coordinator_update(self) -> None:
+        """Self-remove once this parcel falls out of the coordinator data."""
+        if self._get_parcel() is None and self.hass is not None:
+            self.hass.async_create_task(self.async_remove(force_remove=True))
+            return
+        super()._handle_coordinator_update()
+
 
 class DhlSentShipmentsSensor(
     CoordinatorEntity[DhlSentShipmentsCoordinator], SensorEntity
@@ -259,6 +255,8 @@ class DhlSentShipmentsSensor(
     _attr_icon = "mdi:package-variant-closed"
     _attr_native_unit_of_measurement = "parcels"
     _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_attribution = "Data provided by DHL"
+    _unrecorded_attributes = frozenset({"shipments"})
 
     def __init__(
         self,
@@ -301,6 +299,7 @@ class DhlNextDeliverySensor(CoordinatorEntity[DhlCoordinator], SensorEntity):
     _attr_name = "DHL Next Delivery"
     _attr_icon = "mdi:clock-fast"
     _attr_device_class = SensorDeviceClass.TIMESTAMP
+    _attr_attribution = "Data provided by DHL"
 
     def __init__(
         self,
@@ -362,6 +361,8 @@ class DhlEnRouteToServicePointSensor(CoordinatorEntity[DhlCoordinator], SensorEn
     _attr_icon = "mdi:truck-delivery"
     _attr_native_unit_of_measurement = "parcels"
     _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_attribution = "Data provided by DHL"
+    _unrecorded_attributes = frozenset({"parcels"})
 
     def __init__(
         self,
@@ -403,6 +404,8 @@ class DhlPickupPendingSensor(CoordinatorEntity[DhlCoordinator], SensorEntity):
     _attr_icon = "mdi:store-clock"
     _attr_native_unit_of_measurement = "parcels"
     _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_attribution = "Data provided by DHL"
+    _unrecorded_attributes = frozenset({"parcels"})
 
     def __init__(
         self,
@@ -442,6 +445,8 @@ class DhlDeliveredParcelsSensor(CoordinatorEntity[DhlCoordinator], SensorEntity)
     _attr_icon = "mdi:package-variant"
     _attr_native_unit_of_measurement = "parcels"
     _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_attribution = "Data provided by DHL"
+    _unrecorded_attributes = frozenset({"parcels"})
 
     def __init__(
         self,
