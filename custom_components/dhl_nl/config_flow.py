@@ -65,7 +65,7 @@ class DhlConfigFlow(ConfigFlow, domain=DOMAIN):
     @callback
     def async_get_options_flow(config_entry: ConfigEntry) -> DhlOptionsFlowHandler:
         """Return the options flow handler."""
-        return DhlOptionsFlowHandler(config_entry)
+        return DhlOptionsFlowHandler()
 
     async def _validate_credentials(self, email: str, password: str) -> None:
         """Validate credentials against the live DHL API using the HA-managed session."""
@@ -160,10 +160,11 @@ class DhlConfigFlow(ConfigFlow, domain=DOMAIN):
 
 
 class DhlOptionsFlowHandler(OptionsFlow):
-    """Handle DHL options (delivered parcels filter)."""
+    """Handle DHL options (delivered parcels filter).
 
-    def __init__(self, config_entry: ConfigEntry) -> None:
-        self._config_entry = config_entry
+    Modern HA exposes ``self.config_entry`` on ``OptionsFlow`` automatically,
+    so no constructor is needed to store it.
+    """
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
@@ -178,7 +179,7 @@ class DhlOptionsFlowHandler(OptionsFlow):
                 },
             )
 
-        current = self._config_entry.options
+        current = self.config_entry.options
         return self.async_show_form(
             step_id="init",
             data_schema=vol.Schema(
