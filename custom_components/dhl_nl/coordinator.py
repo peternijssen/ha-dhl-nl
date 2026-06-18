@@ -4,8 +4,6 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timedelta, timezone
 
-import aiohttp
-
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
@@ -192,11 +190,10 @@ class DhlCoordinator(DataUpdateCoordinator[list[dict]]):
         try:
             raw = await self._client.async_get_parcels()
         except DhlAuthError as err:
-            _LOGGER.error("DHL authentication failed: %s", err)
             raise ConfigEntryAuthFailed("DHL authentication failed") from err
-        except (DhlApiError, aiohttp.ClientError) as err:
-            _LOGGER.warning("DHL parcels endpoint unreachable: %s", err)
+        except DhlApiError as err:
             raise UpdateFailed(f"DHL error: {err}") from err
+        # aiohttp.ClientError is wrapped automatically by DataUpdateCoordinator.
 
         active = filter_active_parcels(raw)
         delivered = self._apply_delivered_filter(filter_delivered_parcels(raw))
@@ -305,11 +302,10 @@ class DhlSentShipmentsCoordinator(DataUpdateCoordinator[list[dict]]):
         try:
             raw = await self._client.async_get_sent_shipments()
         except DhlAuthError as err:
-            _LOGGER.error("DHL authentication failed: %s", err)
             raise ConfigEntryAuthFailed("DHL authentication failed") from err
-        except (DhlApiError, aiohttp.ClientError) as err:
-            _LOGGER.warning("DHL sent shipments endpoint unreachable: %s", err)
+        except DhlApiError as err:
             raise UpdateFailed(f"DHL error (sent): {err}") from err
+        # aiohttp.ClientError is wrapped automatically by DataUpdateCoordinator.
 
         active = filter_active_sent_shipments(raw)
         _LOGGER.debug(
