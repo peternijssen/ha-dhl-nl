@@ -107,12 +107,18 @@ async def async_setup_entry(
 
 
 def _build_device_info(user_info: dict[str, Any]) -> DeviceInfo:
-    """Return a DeviceInfo dict shared by all sensors for this account."""
+    """Return a DeviceInfo dict shared by all sensors for this account.
+
+    Device name is the integration ("DHL") rather than the account email
+    so the auto-prefixed entity friendly names read as "DHL Incoming
+    parcels" instead of "user@example.com Incoming parcels". Users with
+    multiple DHL accounts can rename the device in the HA UI to
+    distinguish.
+    """
     user_id: str = user_info.get("userId", "")
-    email: str = user_info.get("email", "")
     return DeviceInfo(
         identifiers={(DOMAIN, user_id)},
-        name=email,
+        name="DHL",
         manufacturer="DHL",
         entry_type=DeviceEntryType.SERVICE,
         configuration_url="https://my.dhlecommerce.nl",
