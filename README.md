@@ -39,19 +39,46 @@ A custom Home Assistant integration that tracks your incoming and outgoing DHL e
 
 ## Sensors
 
+The integration creates one device per DHL account (named **DHL**, or
+**DHL 2** / **DHL 3** for additional accounts) with these entities:
+
 | Entity | Description |
-|--------|-------------|
-| `sensor.<account>_dhl_incoming_parcels` | Number of active incoming parcels |
-| `sensor.<account>_dhl_parcel_<barcode>` | Status of a single incoming shipment |
-| `sensor.<account>_dhl_next_delivery` | Earliest expected delivery datetime |
-| `sensor.<account>_dhl_en_route_to_service_point` | Parcels in transit to a ServicePoint |
-| `sensor.<account>_dhl_parcels_awaiting_pickup` | Parcels ready for collection at a ServicePoint |
-| `sensor.<account>_dhl_delivered_parcels` | Recently delivered parcels (configurable window) |
-| `sensor.<account>_dhl_outgoing_parcels` | Number of active outgoing shipments |
+|---|---|
+| `sensor.dhl_incoming_parcels` | Number of active incoming parcels |
+| `sensor.dhl_parcel_<barcode>` | Normalised status of a single incoming shipment |
+| `sensor.dhl_next_delivery` | Earliest expected delivery datetime |
+| `sensor.dhl_en_route_to_service_point` | Parcels in transit to a ServicePoint |
+| `sensor.dhl_awaiting_pickup` | Parcels ready for collection at a ServicePoint |
+| `sensor.dhl_delivered_parcels` | Recently delivered parcels (configurable window) |
+| `sensor.dhl_outgoing_parcels` | Number of active outgoing shipments |
 
-Every parcel exposed on a sensor attribute uses a carrier-agnostic shape — top-level keys are `carrier`, `barcode`, `sender`, `status`, `delivered`, `delivered_at`, `planned_from`, `planned_to`, `pickup`, `pickup_point`, `url`. The original DHL API payload is preserved under `raw` for anyone who needs it. This lets the [parcel aggregator](https://github.com/peternijssen/ha-parcel-aggregator) and any cross-carrier dashboard read parcels from DHL, PostNL and DPD the same way.
+Every parcel exposed on a sensor attribute uses a carrier-agnostic shape:
 
-For full attribute reference, active status categories, and example automations see [docs/sensors.md](docs/sensors.md).
+| Key | Type | Meaning |
+|---|---|---|
+| `carrier` | string | `"DHL"` |
+| `barcode` | string | Parcel tracking number |
+| `sender` | string \| null | Sender name (e.g. webshop) |
+| `status` | `ParcelStatus` | Normalised status — see the [status reference](#parcel-status-reference) |
+| `raw_status` | string | Original DHL status string (for power users) |
+| `delivered` | bool | Whether the parcel has been delivered |
+| `delivered_at` | ISO 8601 \| null | Delivery moment, if known |
+| `planned_from` | ISO 8601 \| null | Expected delivery window start |
+| `planned_to` | ISO 8601 \| null | Expected delivery window end |
+| `pickup` | bool | Destined for a pickup point rather than a home address |
+| `pickup_point` | string \| null | ServicePoint name when `pickup` is true |
+| `url` | string \| null | Deep link to the parcel's tracking page |
+| `raw` | dict | The full original DHL API payload |
+
+This is the same shape that PostNL and DPD use, so the
+[parcel aggregator](https://github.com/peternijssen/ha-parcel-aggregator)
+and any cross-carrier dashboard can read parcels from all three
+integrations the same way.
+
+For full attribute reference, active status categories, and example
+automations see [docs/sensors.md](docs/sensors.md) — or the
+[examples folder](examples/) for ready-to-paste automation and
+dashboard snippets.
 
 ## Example dashboard card
 
