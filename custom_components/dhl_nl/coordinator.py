@@ -20,9 +20,69 @@ from .const import (
     DEFAULT_DELIVERED_FILTER_TYPE,
     DOMAIN,
     POLL_INTERVAL,
+    STATUS_AT_SERVICE_POINT,
+    STATUS_COLLECTED_AT_SERVICE_POINT,
+    ParcelStatus,
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+# Granular DHL status strings → canonical ParcelStatus. Status takes
+# precedence over category because it is more specific.
+_STATUS_MAP: dict[str, ParcelStatus] = {
+    STATUS_AT_SERVICE_POINT: ParcelStatus.AT_PICKUP_POINT,
+    STATUS_COLLECTED_AT_SERVICE_POINT: ParcelStatus.DELIVERED,
+    "OUT_FOR_DELIVERY": ParcelStatus.OUT_FOR_DELIVERY,
+}
+
+# DHL category (high-level state) → canonical ParcelStatus. Used as a
+# fallback when no specific status mapping applies. ``DELIVERED`` here
+# is the only terminal category; everything else is some flavour of
+# "in motion".
+_CATEGORY_MAP: dict[str, ParcelStatus] = {
+    "DATA_RECEIVED": ParcelStatus.REGISTERED,
+    "LEG": ParcelStatus.REGISTERED,
+    "CUSTOMS": ParcelStatus.IN_TRANSIT,
+    "UNDERWAY": ParcelStatus.IN_TRANSIT,
+    "IN_DELIVERY": ParcelStatus.IN_TRANSIT,
+    "INTERVENTION": ParcelStatus.IN_TRANSIT,
+    "EXCEPTION": ParcelStatus.IN_TRANSIT,
+    "PROBLEM": ParcelStatus.IN_TRANSIT,
+    "DELIVERED": ParcelStatus.DELIVERED,
+}
+
+# Already-logged raw statuses so we surface each unmapped value only once
+# per HA session.
+_unmapped_statuses_logged: set[tuple[str, str]] = set()
+
+
+def map_parcel_status(parcel: dict) -> ParcelStatus:
+    """Map a raw DHL parcel to a canonical :class:`ParcelStatus`.
+
+    Strategy: prefer the granular ``status`` field for known terminal /
+    pickup-point situations, fall back to the high-level ``category``,
+    and surface unknown raw values via a one-shot info-level log so we
+    can extend the maps as new statuses appear.
+    """
+    raw_status = parcel.get("status") or ""
+    raw_category = parcel.get("category") or ""
+
+    if raw_status in _STATUS_MAP:
+        return _STATUS_MAP[raw_status]
+    if raw_category in _CATEGORY_MAP:
+        return _CATEGORY_MAP[raw_category]
+
+    key = (raw_status, raw_category)
+    if key not in _unmapped_statuses_logged:
+        _unmapped_statuses_logged.add(key)
+        _LOGGER.info(
+            "DHL parcel status not yet mapped: status=%r category=%r — "
+            "will report as ParcelStatus.UNKNOWN. Please open an issue "
+            "so we can add it to the map.",
+            raw_status,
+            raw_category,
+        )
+    return ParcelStatus.UNKNOWN
 
 
 def _delivery_window(parcel: dict) -> tuple[str | None, str | None]:
