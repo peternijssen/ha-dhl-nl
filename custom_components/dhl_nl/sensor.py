@@ -135,7 +135,6 @@ class DhlIncomingParcelsSensor(CoordinatorEntity[DhlCoordinator], SensorEntity):
 
     _attr_has_entity_name = True
     _attr_translation_key = "incoming_parcels"
-    _attr_icon = "mdi:package-variant-closed"
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_attribution = "Data provided by DHL"
     _unrecorded_attributes = frozenset({"parcels"})
@@ -200,7 +199,6 @@ class DhlParcelSensor(CoordinatorEntity[DhlCoordinator], SensorEntity):
 
     _attr_has_entity_name = True
     _attr_translation_key = "parcel"
-    _attr_icon = "mdi:package-variant-closed"
     _attr_attribution = "Data provided by DHL"
 
     def __init__(
@@ -261,7 +259,6 @@ class DhlSentShipmentsSensor(
 
     _attr_has_entity_name = True
     _attr_translation_key = "outgoing_parcels"
-    _attr_icon = "mdi:package-variant-closed"
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_attribution = "Data provided by DHL"
     _unrecorded_attributes = frozenset({"shipments"})
@@ -306,7 +303,6 @@ class DhlNextDeliverySensor(CoordinatorEntity[DhlCoordinator], SensorEntity):
 
     _attr_has_entity_name = True
     _attr_translation_key = "next_delivery"
-    _attr_icon = "mdi:clock-fast"
     _attr_device_class = SensorDeviceClass.TIMESTAMP
     _attr_attribution = "Data provided by DHL"
 
@@ -368,7 +364,6 @@ class DhlEnRouteToServicePointSensor(CoordinatorEntity[DhlCoordinator], SensorEn
 
     _attr_has_entity_name = True
     _attr_translation_key = "en_route_to_service_point"
-    _attr_icon = "mdi:truck-delivery"
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_attribution = "Data provided by DHL"
     _unrecorded_attributes = frozenset({"parcels"})
@@ -411,7 +406,6 @@ class DhlPickupPendingSensor(CoordinatorEntity[DhlCoordinator], SensorEntity):
 
     _attr_has_entity_name = True
     _attr_translation_key = "awaiting_pickup"
-    _attr_icon = "mdi:store-clock"
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_attribution = "Data provided by DHL"
     _unrecorded_attributes = frozenset({"parcels"})
@@ -452,7 +446,6 @@ class DhlDeliveredParcelsSensor(CoordinatorEntity[DhlCoordinator], SensorEntity)
 
     _attr_has_entity_name = True
     _attr_translation_key = "delivered_parcels"
-    _attr_icon = "mdi:package-variant"
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_attribution = "Data provided by DHL"
     _unrecorded_attributes = frozenset({"parcels"})
