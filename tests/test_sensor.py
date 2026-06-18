@@ -4,7 +4,10 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from custom_components.dhl_nl.const import STATUS_AT_SERVICE_POINT
+from custom_components.dhl_nl.const import (
+    STATUS_AT_SERVICE_POINT,
+    ParcelStatus,
+)
 from custom_components.dhl_nl.coordinator import normalize_parcel
 from custom_components.dhl_nl.sensor import (
     DhlDeliveredParcelsSensor,
@@ -45,10 +48,19 @@ def _parcel(
 # DhlParcelSensor
 # ---------------------------------------------------------------------------
 
-def test_parcel_sensor_returns_status():
-    parcel = _parcel(barcode="ABC", status="DELIVERED_IN_MAILBOX")
+def test_parcel_sensor_returns_normalized_status():
+    """Per-parcel sensor state is the canonical ParcelStatus enum value."""
+    parcel = _parcel(barcode="ABC", status="OUT_FOR_DELIVERY", category="IN_DELIVERY")
     sensor = DhlParcelSensor(_make_coordinator([parcel]), USER_INFO, "ABC")
-    assert sensor.native_value == "DELIVERED_IN_MAILBOX"
+    assert sensor.native_value == ParcelStatus.OUT_FOR_DELIVERY
+
+
+def test_parcel_sensor_exposes_raw_status_in_attributes():
+    """The original DHL status string lives on the ``raw_status`` attribute."""
+    parcel = _parcel(barcode="ABC", status="OUT_FOR_DELIVERY", category="IN_DELIVERY")
+    sensor = DhlParcelSensor(_make_coordinator([parcel]), USER_INFO, "ABC")
+    assert sensor.extra_state_attributes["raw_status"] == "OUT_FOR_DELIVERY"
+    assert sensor.extra_state_attributes["status"] == ParcelStatus.OUT_FOR_DELIVERY
 
 
 def test_parcel_sensor_returns_none_when_barcode_missing():

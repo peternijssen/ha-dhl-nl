@@ -14,7 +14,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import DhlConfigEntry
-from .const import DOMAIN, STATUS_AT_SERVICE_POINT
+from .const import DOMAIN, ParcelStatus
 from .coordinator import DhlCoordinator, DhlSentShipmentsCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -380,7 +380,7 @@ class DhlEnRouteToServicePointSensor(CoordinatorEntity[DhlCoordinator], SensorEn
         return [
             p for p in (self.coordinator.data or [])
             if p.get("pickup")
-            and p.get("status") != STATUS_AT_SERVICE_POINT
+            and p.get("status") != ParcelStatus.AT_PICKUP_POINT
         ]
 
     @property
@@ -424,7 +424,7 @@ class DhlPickupPendingSensor(CoordinatorEntity[DhlCoordinator], SensorEntity):
         return [
             p for p in (self.coordinator.data or [])
             if p.get("pickup")
-            and p.get("status") == STATUS_AT_SERVICE_POINT
+            and p.get("status") == ParcelStatus.AT_PICKUP_POINT
         ]
 
     @property
