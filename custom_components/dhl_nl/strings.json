@@ -63,22 +63,27 @@
   "entity": {
     "sensor": {
       "incoming_parcels": {
-        "name": "Incoming parcels"
+        "name": "Incoming parcels",
+        "unit_of_measurement": "parcels"
       },
       "outgoing_parcels": {
-        "name": "Outgoing parcels"
+        "name": "Outgoing parcels",
+        "unit_of_measurement": "parcels"
       },
       "next_delivery": {
         "name": "Next delivery"
       },
       "en_route_to_service_point": {
-        "name": "En route to ServicePoint"
+        "name": "En route to ServicePoint",
+        "unit_of_measurement": "parcels"
       },
       "awaiting_pickup": {
-        "name": "Awaiting pickup"
+        "name": "Awaiting pickup",
+        "unit_of_measurement": "parcels"
       },
       "delivered_parcels": {
-        "name": "Delivered parcels"
+        "name": "Delivered parcels",
+        "unit_of_measurement": "parcels"
       },
       "parcel": {
         "name": "Parcel {barcode}"

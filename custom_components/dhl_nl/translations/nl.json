@@ -63,22 +63,27 @@
   "entity": {
     "sensor": {
       "incoming_parcels": {
-        "name": "Binnenkomende pakketten"
+        "name": "Binnenkomende pakketten",
+        "unit_of_measurement": "pakketten"
       },
       "outgoing_parcels": {
-        "name": "Uitgaande pakketten"
+        "name": "Uitgaande pakketten",
+        "unit_of_measurement": "pakketten"
       },
       "next_delivery": {
         "name": "Eerstvolgende bezorging"
       },
       "en_route_to_service_point": {
-        "name": "Onderweg naar ServicePoint"
+        "name": "Onderweg naar ServicePoint",
+        "unit_of_measurement": "pakketten"
       },
       "awaiting_pickup": {
-        "name": "Klaar voor afhalen"
+        "name": "Klaar voor afhalen",
+        "unit_of_measurement": "pakketten"
       },
       "delivered_parcels": {
-        "name": "Bezorgde pakketten"
+        "name": "Bezorgde pakketten",
+        "unit_of_measurement": "pakketten"
       },
       "parcel": {
         "name": "Pakket {barcode}"
