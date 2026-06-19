@@ -37,6 +37,23 @@ A custom Home Assistant integration that tracks your incoming and outgoing DHL e
 3. Enter your DHL eCommerce NL **email address** and **password**
 4. Click **Submit**
 
+### Setup parameters
+
+| Field | Description |
+|---|---|
+| Email | The email address of your DHL eCommerce NL account (the consumer portal at [my.dhlecommerce.nl](https://my.dhlecommerce.nl)). |
+| Password | The password for that account. Stored in the HA config entry; updated automatically when the integration triggers a re-authentication. |
+
+## Options
+
+Click **Configure** on the integration card to change the delivered
+parcels filter:
+
+| Option | Description |
+|---|---|
+| Filter by | `Days` keeps delivered parcels visible for the last N days. `Number of parcels` keeps only the N most recent regardless of age. |
+| Amount | The N used by the filter above. |
+
 ## Sensors
 
 The integration creates one device per DHL account, named
