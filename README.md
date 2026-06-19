@@ -39,18 +39,20 @@ A custom Home Assistant integration that tracks your incoming and outgoing DHL e
 
 ## Sensors
 
-The integration creates one device per DHL account (named **DHL**, or
-**DHL 2** / **DHL 3** for additional accounts) with these entities:
+The integration creates one device per DHL account, named
+**`DHL (<your-email>)`**. With multiple accounts each gets its own device
+named after its email. The entities below show the friendly-name pattern;
+their entity_ids carry the same account suffix:
 
-| Entity | Description |
+| Friendly name pattern | Description |
 |---|---|
-| `sensor.dhl_incoming_parcels` | Number of active incoming parcels |
-| `sensor.dhl_parcel_<barcode>` | Normalised status of a single incoming shipment |
-| `sensor.dhl_next_delivery` | Earliest expected delivery datetime |
-| `sensor.dhl_en_route_to_service_point` | Parcels in transit to a ServicePoint |
-| `sensor.dhl_awaiting_pickup` | Parcels ready for collection at a ServicePoint |
-| `sensor.dhl_delivered_parcels` | Recently delivered parcels (configurable window) |
-| `sensor.dhl_outgoing_parcels` | Number of active outgoing shipments |
+| `DHL (account) Incoming parcels` | Number of active incoming parcels |
+| `DHL (account) Parcel <barcode>` | Normalised status of a single incoming shipment |
+| `DHL (account) Next delivery` | Earliest expected delivery datetime |
+| `DHL (account) En route to ServicePoint` | Parcels in transit to a ServicePoint |
+| `DHL (account) Awaiting pickup` | Parcels ready for collection at a ServicePoint |
+| `DHL (account) Delivered parcels` | Recently delivered parcels (configurable window) |
+| `DHL (account) Outgoing parcels` | Number of active outgoing shipments |
 
 Every parcel exposed on a sensor attribute uses a carrier-agnostic shape:
 
