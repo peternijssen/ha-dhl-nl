@@ -14,7 +14,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import DhlConfigEntry
-from .const import DOMAIN, STATUS_AT_SERVICE_POINT
+from .const import DOMAIN, ParcelStatus
 from .coordinator import DhlCoordinator, DhlSentShipmentsCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -107,12 +107,20 @@ async def async_setup_entry(
 
 
 def _build_device_info(user_info: dict[str, Any]) -> DeviceInfo:
-    """Return a DeviceInfo dict shared by all sensors for this account."""
+    """Return a DeviceInfo dict shared by all sensors for this account.
+
+    Device name is ``"DHL (<email>)"`` so the auto-prefixed entity
+    friendly names read as ``"DHL (account@example.com) Incoming
+    parcels"``. Including the account in the device name disambiguates
+    users with multiple DHL accounts and matches mainstream HA style for
+    cloud-account integrations.
+    """
     user_id: str = user_info.get("userId", "")
     email: str = user_info.get("email", "")
+    device_name = f"DHL ({email})" if email else "DHL"
     return DeviceInfo(
         identifiers={(DOMAIN, user_id)},
-        name=email,
+        name=device_name,
         manufacturer="DHL",
         entry_type=DeviceEntryType.SERVICE,
         configuration_url="https://my.dhlecommerce.nl",
@@ -127,9 +135,8 @@ class DhlIncomingParcelsSensor(CoordinatorEntity[DhlCoordinator], SensorEntity):
     drops out of the coordinator data — see ``DhlParcelSensor``.
     """
 
-    _attr_name = "DHL Incoming Parcels"
-    _attr_icon = "mdi:package-variant-closed"
-    _attr_native_unit_of_measurement = "parcels"
+    _attr_has_entity_name = True
+    _attr_translation_key = "incoming_parcels"
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_attribution = "Data provided by DHL"
     _unrecorded_attributes = frozenset({"parcels"})
@@ -192,7 +199,8 @@ class DhlIncomingParcelsSensor(CoordinatorEntity[DhlCoordinator], SensorEntity):
 class DhlParcelSensor(CoordinatorEntity[DhlCoordinator], SensorEntity):
     """Per-parcel sensor reporting the status of a single incoming DHL shipment."""
 
-    _attr_icon = "mdi:package-variant-closed"
+    _attr_has_entity_name = True
+    _attr_translation_key = "parcel"
     _attr_attribution = "Data provided by DHL"
 
     def __init__(
@@ -207,7 +215,7 @@ class DhlParcelSensor(CoordinatorEntity[DhlCoordinator], SensorEntity):
         self._barcode = barcode
         user_id: str = user_info.get("userId", "")
         self._attr_unique_id = f"{user_id}_{barcode}"
-        self._attr_name = f"DHL Parcel {barcode}"
+        self._attr_translation_placeholders = {"barcode": barcode}
         self._attr_device_info = _build_device_info(user_info)
 
     # ------------------------------------------------------------------
@@ -251,9 +259,8 @@ class DhlSentShipmentsSensor(
     single entity.
     """
 
-    _attr_name = "DHL Outgoing Parcels"
-    _attr_icon = "mdi:package-variant-closed"
-    _attr_native_unit_of_measurement = "parcels"
+    _attr_has_entity_name = True
+    _attr_translation_key = "outgoing_parcels"
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_attribution = "Data provided by DHL"
     _unrecorded_attributes = frozenset({"shipments"})
@@ -282,22 +289,7 @@ class DhlSentShipmentsSensor(
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return the full list of active sent shipments as an attribute."""
-        shipments = self.coordinator.data or []
-        return {
-            "shipments": [
-                {
-                    "barcode": s.get("barcode"),
-                    "orderId": s.get("orderId"),
-                    "status": s.get("status"),
-                    "category": s.get("category"),
-                    "receiver": s.get("receiver"),
-                    "destination": s.get("destination"),
-                    "timeCreated": s.get("timeCreated"),
-                    "receivingTimeIndication": s.get("receivingTimeIndication"),
-                }
-                for s in shipments
-            ]
-        }
+        return {"shipments": self.coordinator.data or []}
 
 
 class DhlNextDeliverySensor(CoordinatorEntity[DhlCoordinator], SensorEntity):
@@ -311,8 +303,8 @@ class DhlNextDeliverySensor(CoordinatorEntity[DhlCoordinator], SensorEntity):
     have a known delivery time indication.
     """
 
-    _attr_name = "DHL Next Delivery"
-    _attr_icon = "mdi:clock-fast"
+    _attr_has_entity_name = True
+    _attr_translation_key = "next_delivery"
     _attr_device_class = SensorDeviceClass.TIMESTAMP
     _attr_attribution = "Data provided by DHL"
 
@@ -329,22 +321,10 @@ class DhlNextDeliverySensor(CoordinatorEntity[DhlCoordinator], SensorEntity):
         self._attr_device_info = _build_device_info(user_info)
 
     def _delivery_moments(self) -> list[tuple[datetime, dict]]:
-        """Return (datetime, parcel) pairs for all parcels with a known delivery time.
-
-        Handles two receivingTimeIndication types:
-        - MomentIndication: single ``moment`` timestamp
-        - IntervalIndication: ``start`` / ``end`` window; ``start`` is used
-        """
+        """Return (datetime, parcel) pairs for parcels with a known ``planned_from``."""
         result: list[tuple[datetime, dict]] = []
         for parcel in self.coordinator.data or []:
-            indication = parcel.get("receivingTimeIndication") or {}
-            indication_type = indication.get("indicationType")
-            if indication_type == "MomentIndication":
-                moment_str = indication.get("moment")
-            elif indication_type == "IntervalIndication":
-                moment_str = indication.get("start")
-            else:
-                continue
+            moment_str = parcel.get("planned_from")
             if not moment_str:
                 continue
             try:
@@ -369,10 +349,9 @@ class DhlNextDeliverySensor(CoordinatorEntity[DhlCoordinator], SensorEntity):
         if not moments:
             return {}
         _, earliest = min(moments, key=lambda x: x[0])
-        sender = earliest.get("sender") or {}
         return {
             "barcode": earliest.get("barcode"),
-            "sender": sender.get("name"),
+            "sender": earliest.get("sender"),
         }
 
 
@@ -385,9 +364,8 @@ class DhlEnRouteToServicePointSensor(CoordinatorEntity[DhlCoordinator], SensorEn
     destined active parcels are included.
     """
 
-    _attr_name = "DHL Parcels En Route to ServicePoint"
-    _attr_icon = "mdi:truck-delivery"
-    _attr_native_unit_of_measurement = "parcels"
+    _attr_has_entity_name = True
+    _attr_translation_key = "en_route_to_service_point"
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_attribution = "Data provided by DHL"
     _unrecorded_attributes = frozenset({"parcels"})
@@ -407,8 +385,8 @@ class DhlEnRouteToServicePointSensor(CoordinatorEntity[DhlCoordinator], SensorEn
         """Return active parcels still in transit to a ServicePoint."""
         return [
             p for p in (self.coordinator.data or [])
-            if (p.get("destination") or {}).get("locationType") == "SERVICEPOINT"
-            and p.get("status") != STATUS_AT_SERVICE_POINT
+            if p.get("pickup")
+            and p.get("status") != ParcelStatus.AT_PICKUP_POINT
         ]
 
     @property
@@ -417,19 +395,7 @@ class DhlEnRouteToServicePointSensor(CoordinatorEntity[DhlCoordinator], SensorEn
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        parcels = self._get_en_route_parcels()
-        return {
-            "parcels": [
-                {
-                    "barcode": p.get("barcode"),
-                    "sender": (p.get("sender") or {}).get("name"),
-                    "service_point": (p.get("destination") or {}).get("name"),
-                    "service_point_address": (p.get("destination") or {}).get("address"),
-                    "status": p.get("status"),
-                }
-                for p in parcels
-            ]
-        }
+        return {"parcels": self._get_en_route_parcels()}
 
 
 class DhlPickupPendingSensor(CoordinatorEntity[DhlCoordinator], SensorEntity):
@@ -440,9 +406,8 @@ class DhlPickupPendingSensor(CoordinatorEntity[DhlCoordinator], SensorEntity):
     pending pickup parcels is exposed as an attribute.
     """
 
-    _attr_name = "DHL Parcels Awaiting Pickup"
-    _attr_icon = "mdi:store-clock"
-    _attr_native_unit_of_measurement = "parcels"
+    _attr_has_entity_name = True
+    _attr_translation_key = "awaiting_pickup"
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_attribution = "Data provided by DHL"
     _unrecorded_attributes = frozenset({"parcels"})
@@ -463,8 +428,8 @@ class DhlPickupPendingSensor(CoordinatorEntity[DhlCoordinator], SensorEntity):
         """Return parcels that have arrived at a ServicePoint and are ready for collection."""
         return [
             p for p in (self.coordinator.data or [])
-            if (p.get("destination") or {}).get("locationType") == "SERVICEPOINT"
-            and p.get("status") == STATUS_AT_SERVICE_POINT
+            if p.get("pickup")
+            and p.get("status") == ParcelStatus.AT_PICKUP_POINT
         ]
 
     @property
@@ -475,27 +440,14 @@ class DhlPickupPendingSensor(CoordinatorEntity[DhlCoordinator], SensorEntity):
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return details of each parcel awaiting pickup."""
-        parcels = self._get_pickup_parcels()
-        return {
-            "parcels": [
-                {
-                    "barcode": p.get("barcode"),
-                    "sender": (p.get("sender") or {}).get("name"),
-                    "pickup_location": (p.get("destination") or {}).get("name"),
-                    "pickup_address": (p.get("destination") or {}).get("address"),
-                    "status": p.get("status"),
-                }
-                for p in parcels
-            ]
-        }
+        return {"parcels": self._get_pickup_parcels()}
 
 
 class DhlDeliveredParcelsSensor(CoordinatorEntity[DhlCoordinator], SensorEntity):
     """Sensor reporting recently delivered incoming DHL parcels."""
 
-    _attr_name = "DHL Delivered Parcels"
-    _attr_icon = "mdi:package-variant"
-    _attr_native_unit_of_measurement = "parcels"
+    _attr_has_entity_name = True
+    _attr_translation_key = "delivered_parcels"
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_attribution = "Data provided by DHL"
     _unrecorded_attributes = frozenset({"parcels"})
@@ -517,14 +469,4 @@ class DhlDeliveredParcelsSensor(CoordinatorEntity[DhlCoordinator], SensorEntity)
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        return {
-            "parcels": [
-                {
-                    "barcode": p.get("barcode"),
-                    "sender": (p.get("sender") or {}).get("name"),
-                    "status": p.get("status"),
-                    "delivery_date": (p.get("receivingTimeIndication") or {}).get("moment"),
-                }
-                for p in self.coordinator.delivered
-            ]
-        }
+        return {"parcels": self.coordinator.delivered}

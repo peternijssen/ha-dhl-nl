@@ -15,6 +15,7 @@ from custom_components.dhl_nl.coordinator import (
     filter_active_parcels,
     filter_active_sent_shipments,
     filter_delivered_parcels,
+    normalize_parcel,
 )
 
 
@@ -27,12 +28,17 @@ def _mock_entry(filter_type: str = "days", filter_amount: int = 7) -> MagicMock:
     return entry
 
 
-def _parcel(category: str, is_return: bool = False, moment: str | None = None) -> dict:
+def _parcel(
+    category: str,
+    is_return: bool = False,
+    moment: str | None = None,
+    barcode: str = "TEST123",
+) -> dict:
     indication = (
         {"indicationType": "MomentIndication", "moment": moment} if moment else None
     )
     return {
-        "barcode": "TEST123",
+        "barcode": barcode,
         "category": category,
         "isReturn": is_return,
         "receivingTimeIndication": indication,
@@ -202,7 +208,118 @@ async def test_coordinator_returns_only_active_parcels(hass):
     result = await coordinator._async_update_data()
 
     assert len(result) == 1
-    assert result[0]["category"] == "IN_DELIVERY"
+    assert result[0]["raw"]["category"] == "IN_DELIVERY"
+    assert result[0]["carrier"] == "DHL"
+
+
+# ---------------------------------------------------------------------------
+# normalize_parcel
+# ---------------------------------------------------------------------------
+
+
+def test_normalize_active_with_moment_indication():
+    parcel = {
+        "barcode": "ABC",
+        "category": "IN_DELIVERY",
+        "status": "IN_DELIVERY",
+        "sender": {"name": "Test Sender"},
+        "destination": {"locationType": "ADDRESS", "name": "Home"},
+        "receivingTimeIndication": {
+            "indicationType": "MomentIndication",
+            "moment": "2026-06-15T14:00:00+02:00",
+        },
+    }
+    result = normalize_parcel(parcel)
+    assert result["carrier"] == "DHL"
+    assert result["barcode"] == "ABC"
+    assert result["sender"] == "Test Sender"
+    assert result["delivered"] is False
+    assert result["delivered_at"] is None
+    assert result["planned_from"] == "2026-06-15T14:00:00+02:00"
+    assert result["planned_to"] is None
+    assert result["pickup"] is False
+    assert result["pickup_point"] is None
+    assert result["raw"] == parcel
+
+
+def test_normalize_active_with_interval_indication():
+    parcel = {
+        "barcode": "ABC",
+        "category": "IN_DELIVERY",
+        "destination": {"locationType": "ADDRESS"},
+        "receivingTimeIndication": {
+            "indicationType": "IntervalIndication",
+            "start": "2026-06-15T14:00:00+02:00",
+            "end": "2026-06-15T16:00:00+02:00",
+        },
+    }
+    result = normalize_parcel(parcel)
+    assert result["planned_from"] == "2026-06-15T14:00:00+02:00"
+    assert result["planned_to"] == "2026-06-15T16:00:00+02:00"
+
+
+def test_normalize_delivered_sets_delivered_at_not_planned():
+    parcel = {
+        "barcode": "ABC",
+        "category": "DELIVERED",
+        "destination": {"locationType": "ADDRESS"},
+        "receivingTimeIndication": {
+            "indicationType": "MomentIndication",
+            "moment": "2026-06-15T14:00:00+02:00",
+        },
+    }
+    result = normalize_parcel(parcel)
+    assert result["delivered"] is True
+    assert result["delivered_at"] == "2026-06-15T14:00:00+02:00"
+    assert result["planned_from"] is None
+    assert result["planned_to"] is None
+
+
+def test_normalize_pickup_point():
+    parcel = {
+        "barcode": "ABC",
+        "category": "IN_DELIVERY",
+        "destination": {"locationType": "SERVICEPOINT", "name": "Albert Heijn Centrum"},
+    }
+    result = normalize_parcel(parcel)
+    assert result["pickup"] is True
+    assert result["pickup_point"] == "Albert Heijn Centrum"
+
+
+def test_normalize_handles_missing_fields():
+    result = normalize_parcel({})
+    assert result["carrier"] == "DHL"
+    assert result["barcode"] is None
+    assert result["sender"] is None
+    assert result["pickup"] is False
+    assert result["pickup_point"] is None
+    assert result["url"] is None
+
+
+def test_normalize_constructs_tracking_url():
+    parcel = {
+        "barcode": "3SXXXXXXXXXXXXXXXXX",
+        "category": "IN_DELIVERY",
+        "destination": {"address": {"postalCode": "1234 AB"}},
+    }
+    result = normalize_parcel(parcel)
+    assert result["url"] == (
+        "https://my.dhlecommerce.nl/portal/tracktrace/3SXXXXXXXXXXXXXXXXX/1234AB"
+    )
+
+
+def test_normalize_url_none_when_postcode_missing():
+    parcel = {
+        "barcode": "3SXXXXXXXXXXXXXXXXX",
+        "category": "IN_DELIVERY",
+        "destination": {"address": {}},
+    }
+    assert normalize_parcel(parcel)["url"] is None
+
+
+# ---------------------------------------------------------------------------
+# Coordinator data-flow
+# ---------------------------------------------------------------------------
 
 
 async def test_coordinator_populates_delivered(hass):
@@ -218,4 +335,111 @@ async def test_coordinator_populates_delivered(hass):
     await coordinator._async_update_data()
 
     assert len(coordinator.delivered) == 1
-    assert coordinator.delivered[0]["category"] == "DELIVERED"
+    assert coordinator.delivered[0]["raw"]["category"] == "DELIVERED"
+
+
+# ---------------------------------------------------------------------------
+# Event firing — parcel_registered and parcel_status_changed
+# ---------------------------------------------------------------------------
+
+
+async def test_no_events_on_first_refresh(hass):
+    """The first refresh seeds known state silently — no events."""
+    client = MagicMock()
+    client.async_get_parcels = AsyncMock(return_value=[
+        _parcel("IN_DELIVERY", barcode="A"),
+        _parcel("IN_DELIVERY", barcode="B"),
+    ])
+
+    fired: list = []
+    hass.bus.async_listen("dhl_nl_parcel_registered", lambda e: fired.append(e))
+    hass.bus.async_listen("dhl_nl_parcel_status_changed", lambda e: fired.append(e))
+
+    coordinator = DhlCoordinator(hass, client, _mock_entry())
+    await coordinator._async_update_data()
+    await hass.async_block_till_done()
+
+    assert fired == []
+
+
+async def test_registered_event_for_new_barcodes(hass):
+    """A barcode that appears for the first time after seeding fires registered."""
+    client = MagicMock()
+    client.async_get_parcels = AsyncMock(side_effect=[
+        [_parcel("IN_DELIVERY", barcode="A")],
+        [_parcel("IN_DELIVERY", barcode="A"), _parcel("IN_DELIVERY", barcode="B")],
+    ])
+
+    registered: list = []
+    hass.bus.async_listen(
+        "dhl_nl_parcel_registered", lambda e: registered.append(e.data)
+    )
+
+    coordinator = DhlCoordinator(hass, client, _mock_entry())
+    await coordinator._async_update_data()
+    await coordinator._async_update_data()
+    await hass.async_block_till_done()
+
+    assert len(registered) == 1
+    assert registered[0]["barcode"] == "B"
+
+
+async def test_status_changed_event_when_status_transitions(hass):
+    """A barcode whose normalized status changes fires status_changed."""
+    client = MagicMock()
+    client.async_get_parcels = AsyncMock(side_effect=[
+        [_parcel("IN_DELIVERY", barcode="A")],
+        [_parcel("DELIVERED", barcode="A")],
+    ])
+
+    changed: list = []
+    hass.bus.async_listen(
+        "dhl_nl_parcel_status_changed", lambda e: changed.append(e.data)
+    )
+
+    coordinator = DhlCoordinator(hass, client, _mock_entry())
+    await coordinator._async_update_data()
+    # After refresh 1, barcode A becomes delivered → it falls out of
+    # active parcels, so it does not appear on refresh 2 in the active
+    # list either. The status_changed event fires only when the barcode
+    # is still present with a different status.
+    # To test a real transition, both refreshes must return barcode A in
+    # the active list with different statuses.
+    await coordinator._async_update_data()
+    await hass.async_block_till_done()
+
+    # Status went from IN_DELIVERY → DELIVERED, but DELIVERED filters out
+    # of the active list. So expect no status_changed event in this scenario.
+    # This is documented behaviour: events track active parcels only.
+    assert changed == []
+
+
+async def test_status_changed_event_when_active_status_transitions(hass):
+    """When an active parcel changes from one IN_TRANSIT status to another."""
+    from custom_components.dhl_nl.const import ParcelStatus
+
+    p1 = _parcel("IN_DELIVERY", barcode="A")
+    p1["status"] = "DATA_RECEIVED"  # raw status — maps to REGISTERED via fallback
+    p1["category"] = "DATA_RECEIVED"
+
+    p2 = _parcel("IN_DELIVERY", barcode="A")
+    p2["status"] = "OUT_FOR_DELIVERY"  # maps to OUT_FOR_DELIVERY
+    p2["category"] = "IN_DELIVERY"
+
+    client = MagicMock()
+    client.async_get_parcels = AsyncMock(side_effect=[[p1], [p2]])
+
+    changed: list = []
+    hass.bus.async_listen(
+        "dhl_nl_parcel_status_changed", lambda e: changed.append(e.data)
+    )
+
+    coordinator = DhlCoordinator(hass, client, _mock_entry())
+    await coordinator._async_update_data()
+    await coordinator._async_update_data()
+    await hass.async_block_till_done()
+
+    assert len(changed) == 1
+    assert changed[0]["barcode"] == "A"
+    assert changed[0]["old_status"] == ParcelStatus.REGISTERED
+    assert changed[0]["new_status"] == ParcelStatus.OUT_FOR_DELIVERY

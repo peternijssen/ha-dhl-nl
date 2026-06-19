@@ -51,7 +51,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: DhlConfigEntry) -> bool:
 
     try:
         user_info = await client.async_login()
-    except (DhlAuthError, aiohttp.ClientError) as exc:
+    except DhlAuthError as exc:
+        _LOGGER.error("DHL authentication failed during setup: %s", exc)
+        raise ConfigEntryNotReady("DHL login failed") from exc
+    except aiohttp.ClientError as exc:
         raise ConfigEntryNotReady("DHL login failed") from exc
 
     coordinator = DhlCoordinator(hass, client, entry)

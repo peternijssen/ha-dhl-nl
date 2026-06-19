@@ -4,7 +4,11 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from custom_components.dhl_nl.const import STATUS_AT_SERVICE_POINT
+from custom_components.dhl_nl.const import (
+    STATUS_AT_SERVICE_POINT,
+    ParcelStatus,
+)
+from custom_components.dhl_nl.coordinator import normalize_parcel
 from custom_components.dhl_nl.sensor import (
     DhlDeliveredParcelsSensor,
     DhlEnRouteToServicePointSensor,
@@ -28,25 +32,35 @@ def _parcel(
     status: str = "IN_DELIVERY",
     location_type: str = "ADDRESS",
     indication: dict | None = None,
+    category: str = "IN_DELIVERY",
 ) -> dict:
-    return {
+    return normalize_parcel({
         "barcode": barcode,
         "status": status,
-        "category": "IN_DELIVERY",
+        "category": category,
         "destination": {"locationType": location_type, "name": "DHL ServicePoint"},
         "sender": {"name": "Example Sender"},
         "receivingTimeIndication": indication,
-    }
+    })
 
 
 # ---------------------------------------------------------------------------
 # DhlParcelSensor
 # ---------------------------------------------------------------------------
 
-def test_parcel_sensor_returns_status():
-    parcel = _parcel(barcode="ABC", status="DELIVERED_IN_MAILBOX")
+def test_parcel_sensor_returns_normalized_status():
+    """Per-parcel sensor state is the canonical ParcelStatus enum value."""
+    parcel = _parcel(barcode="ABC", status="OUT_FOR_DELIVERY", category="IN_DELIVERY")
     sensor = DhlParcelSensor(_make_coordinator([parcel]), USER_INFO, "ABC")
-    assert sensor.native_value == "DELIVERED_IN_MAILBOX"
+    assert sensor.native_value == ParcelStatus.OUT_FOR_DELIVERY
+
+
+def test_parcel_sensor_exposes_raw_status_in_attributes():
+    """The original DHL status string lives on the ``raw_status`` attribute."""
+    parcel = _parcel(barcode="ABC", status="OUT_FOR_DELIVERY", category="IN_DELIVERY")
+    sensor = DhlParcelSensor(_make_coordinator([parcel]), USER_INFO, "ABC")
+    assert sensor.extra_state_attributes["raw_status"] == "OUT_FOR_DELIVERY"
+    assert sensor.extra_state_attributes["status"] == ParcelStatus.OUT_FOR_DELIVERY
 
 
 def test_parcel_sensor_returns_none_when_barcode_missing():
@@ -167,14 +181,14 @@ def test_pickup_pending_zero_when_no_parcels():
 
 
 def _delivered_parcel(barcode: str = "DEL123") -> dict:
-    return {
+    return normalize_parcel({
         "barcode": barcode,
         "category": "DELIVERED",
         "isReturn": False,
         "status": "DELIVERED",
         "sender": {"name": "Test Sender"},
         "receivingTimeIndication": {"indicationType": "MomentIndication", "moment": "2026-05-30T14:00:00Z"},
-    }
+    })
 
 
 def test_delivered_sensor_count_matches_coordinator_delivered():
@@ -205,8 +219,14 @@ def test_delivered_sensor_attributes_include_sender():
 
 
 def test_delivered_sensor_attributes_handle_missing_sender():
-    parcel = _delivered_parcel()
-    parcel["sender"] = None
+    parcel = normalize_parcel({
+        "barcode": "DEL123",
+        "category": "DELIVERED",
+        "isReturn": False,
+        "status": "DELIVERED",
+        "sender": None,
+        "receivingTimeIndication": {"indicationType": "MomentIndication", "moment": "2026-05-30T14:00:00Z"},
+    })
     sensor = DhlDeliveredParcelsSensor(_make_coordinator([], [parcel]), USER_INFO)
     attrs = sensor.extra_state_attributes
     assert attrs["parcels"][0]["sender"] is None

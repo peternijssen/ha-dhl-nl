@@ -240,3 +240,22 @@ The integration applies two filters before exposing parcels as sensors:
 | `200` | Success |
 | `401` / `403` | Session expired — the integration re-authenticates and retries once |
 | `4xx` / `5xx` | Other failure — raises `DhlApiError` with the status code |
+
+## How the integration exposes parcels
+
+Each surviving parcel is transformed into a carrier-agnostic dict before being placed on a sensor attribute. Top-level keys come from the [shared shape](https://github.com/peternijssen/ha-parcel-aggregator); the original DHL payload is preserved under `raw`.
+
+| Sensor field | Source on the DHL parcel |
+|--------------|--------------------------|
+| `carrier` | Constant `"DHL"` |
+| `barcode` | `barcode` |
+| `sender` | `sender.name` |
+| `status` | `status` |
+| `delivered` | `category == "DELIVERED"` |
+| `delivered_at` | `receivingTimeIndication.moment` / `.start` (delivered only) |
+| `planned_from` | `receivingTimeIndication.moment` for `MomentIndication`, `.start` for `IntervalIndication` (active only) |
+| `planned_to` | `receivingTimeIndication.end` for `IntervalIndication`; `null` for `MomentIndication` |
+| `pickup` | `destination.locationType == "SERVICEPOINT"` |
+| `pickup_point` | `destination.name` when `pickup` is `true` |
+| `url` | Constructed as `https://my.dhlecommerce.nl/portal/tracktrace/{barcode}/{destination.address.postalCode}` (whitespace stripped from the postcode). `null` when either is missing. |
+| `raw` | The full parcel object as returned above |

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from typing import Any
 
 import aiohttp
@@ -65,7 +66,7 @@ class DhlConfigFlow(ConfigFlow, domain=DOMAIN):
     @callback
     def async_get_options_flow(config_entry: ConfigEntry) -> DhlOptionsFlowHandler:
         """Return the options flow handler."""
-        return DhlOptionsFlowHandler(config_entry)
+        return DhlOptionsFlowHandler()
 
     async def _validate_credentials(self, email: str, password: str) -> None:
         """Validate credentials against the live DHL API using the HA-managed session."""
@@ -122,7 +123,7 @@ class DhlConfigFlow(ConfigFlow, domain=DOMAIN):
         )
 
     async def async_step_reauth(
-        self, entry_data: dict[str, Any]
+        self, entry_data: Mapping[str, Any]
     ) -> ConfigFlowResult:
         """Initiate re-authentication for an existing config entry."""
         return await self.async_step_reauth_confirm()
@@ -144,13 +145,10 @@ class DhlConfigFlow(ConfigFlow, domain=DOMAIN):
             except aiohttp.ClientError:
                 errors["base"] = "cannot_connect"
             else:
-                reauth_entry = self._get_reauth_entry()
-                self.hass.config_entries.async_update_entry(
-                    reauth_entry,
+                return self.async_update_reload_and_abort(
+                    self._get_reauth_entry(),
                     data={CONF_EMAIL: email, CONF_PASSWORD: password},
                 )
-                await self.hass.config_entries.async_reload(reauth_entry.entry_id)
-                return self.async_abort(reason="reauth_successful")
 
         return self.async_show_form(
             step_id="reauth_confirm",
@@ -160,10 +158,11 @@ class DhlConfigFlow(ConfigFlow, domain=DOMAIN):
 
 
 class DhlOptionsFlowHandler(OptionsFlow):
-    """Handle DHL options (delivered parcels filter)."""
+    """Handle DHL options (delivered parcels filter).
 
-    def __init__(self, config_entry: ConfigEntry) -> None:
-        self._config_entry = config_entry
+    Modern HA exposes ``self.config_entry`` on ``OptionsFlow`` automatically,
+    so no constructor is needed to store it.
+    """
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
@@ -178,7 +177,7 @@ class DhlOptionsFlowHandler(OptionsFlow):
                 },
             )
 
-        current = self._config_entry.options
+        current = self.config_entry.options
         return self.async_show_form(
             step_id="init",
             data_schema=vol.Schema(
