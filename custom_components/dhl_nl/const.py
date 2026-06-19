@@ -20,6 +20,7 @@ class ParcelStatus(StrEnum):
     AT_PICKUP_POINT = "at_pickup_point"     # Arrived at the chosen ServicePoint / PostNL Point / ParcelShop
     DELIVERED = "delivered"                 # Handed over (mailbox, recipient, neighbour, picked up)
     RETURNING = "returning"                 # Failed delivery, going back to sender
+    PROBLEM = "problem"                     # Carrier reports an exception, intervention, or other issue
     UNKNOWN = "unknown"                     # Raw status we have not mapped yet — logged at info level
 
 PLATFORMS = [Platform.SENSOR]

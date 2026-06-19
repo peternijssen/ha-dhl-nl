@@ -43,9 +43,9 @@ _CATEGORY_MAP: dict[str, ParcelStatus] = {
     "CUSTOMS": ParcelStatus.IN_TRANSIT,
     "UNDERWAY": ParcelStatus.IN_TRANSIT,
     "IN_DELIVERY": ParcelStatus.IN_TRANSIT,
-    "INTERVENTION": ParcelStatus.IN_TRANSIT,
-    "EXCEPTION": ParcelStatus.IN_TRANSIT,
-    "PROBLEM": ParcelStatus.IN_TRANSIT,
+    "INTERVENTION": ParcelStatus.PROBLEM,
+    "EXCEPTION": ParcelStatus.PROBLEM,
+    "PROBLEM": ParcelStatus.PROBLEM,
     "DELIVERED": ParcelStatus.DELIVERED,
 }
 
