@@ -203,7 +203,7 @@ Tracking parcels from other Dutch carriers:
 
 ## Disclaimer
 
-This is an independent, community-built project with no affiliation, endorsement, or connection to DHL or any of its subsidiaries. The DHL eCommerce NL API is undocumented and may change without notice.
+This is an independent, community-built project with no affiliation, endorsement, or connection to DHL or any of its subsidiaries. The DHL eCommerce NL API is undocumented and may change without notice. The maintainers have not asked DHL for permission to use this API; installing this integration may breach DHL's Terms of Service. You take any risk that follows — account suspension, service disruption, etc. No warranty (see [LICENSE](LICENSE)).
 
 ## Contributing
 
