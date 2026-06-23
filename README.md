@@ -2,6 +2,24 @@
 
 A custom Home Assistant integration that tracks your incoming and outgoing DHL eCommerce NL shipments.
 
+## Contents
+
+- [Features](#features)
+- [Requirements](#requirements)
+- [Installation](#installation)
+- [Configuration](#configuration)
+- [Options](#options)
+- [Removal](#removal)
+- [Sensors](#sensors)
+- [Parcel status reference](#parcel-status-reference)
+- [Events](#events)
+- [Examples](#examples)
+- [Troubleshooting](#troubleshooting)
+- [Related integrations](#related-integrations)
+- [Disclaimer](#disclaimer)
+- [Contributing](#contributing)
+- [License](#license)
+
 ## Features
 
 - Incoming and outgoing parcel count sensors
@@ -148,15 +166,18 @@ event-driven automations.
 
 ## Examples
 
-The [`examples/`](examples/) folder ships ready-to-paste snippets for
-both automations and dashboards. Highlights:
+Ready-to-paste automations and dashboard cards live in [`examples/`](examples/).
 
-- [`examples/automations/notify_when_parcel_registered.yaml`](examples/automations/notify_when_parcel_registered.yaml) — push notification when DHL announces a new parcel.
-- [`examples/automations/notify_when_out_for_delivery.yaml`](examples/automations/notify_when_out_for_delivery.yaml) — alert exactly once per parcel when it's on the truck today.
-- [`examples/automations/notify_when_at_servicepoint.yaml`](examples/automations/notify_when_at_servicepoint.yaml) — alert when a parcel arrives at a ServicePoint for pickup.
-- [`examples/dashboards/active_parcels_grid.yaml`](examples/dashboards/active_parcels_grid.yaml) — markdown card listing every active parcel with sender, normalised status and tracking link.
-- [`examples/dashboards/summary_glance.yaml`](examples/dashboards/summary_glance.yaml) — compact glance row with the day-to-day counters.
-- [`examples/dashboards/next_delivery_countdown.yaml`](examples/dashboards/next_delivery_countdown.yaml) — single card showing the next expected delivery and details.
+### Community Lovelace cards
+
+If you want a richer UI than the snippets above, third-party cards work
+nicely with this integration's sensors:
+
+- [jonisnet/hki-parcels-card](https://github.com/jonisnet/hki-parcels-card) — multi-carrier (PostNL, DHL, DPD) Home Kit-style card with Onderweg/Bezorgd/Verzonden/Post tabs.
+- [klaptafel/ha-package-tracker-card](https://github.com/klaptafel/ha-package-tracker-card) — purpose-built card for parcel integrations; renders each parcel with sender, status and tracking link.
+
+Both are maintained by their respective authors — please raise UI issues
+in those repos.
 
 ### Community Lovelace cards
 

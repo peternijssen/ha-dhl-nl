@@ -12,9 +12,7 @@ Full reference for all sensors provided by the DHL NL integration.
 > `status` (the normalised [`ParcelStatus`](#parcel-status-reference)
 > value), `raw_status` (the original DHL string), `delivered`,
 > `delivered_at`, `planned_from`, `planned_to`, `pickup`, `pickup_point`,
-> `url`, plus the original DHL payload under `raw`. See
-> [docs/api/parcels.md → How the integration exposes parcels](api/parcels.md#how-the-integration-exposes-parcels)
-> for the source mapping.
+> `url`, plus the original DHL payload under `raw`.
 
 ## Incoming parcels
 

@@ -17,12 +17,6 @@ custom_components/dhl_nl/
 └── translations/
     ├── en.json        # English translations
     └── nl.json        # Dutch translations
-
-docs/api/
-├── README.md          # API overview and authentication
-├── login.md           # POST /api/user/login
-├── parcels.md         # GET /receiver-parcel-api/parcels
-└── sent_shipments.md  # GET /api/orders/sentShipments
 ```
 
 ## Data flow
@@ -145,4 +139,3 @@ hass.data["dhl_nl"] = {
 3. Add a filter function and a new `DataUpdateCoordinator` subclass in `coordinator.py`
 4. Instantiate the coordinator in `__init__.py` and store it in `hass.data`
 5. Add the corresponding sensor class(es) in `sensor.py`
-6. Document the endpoint in `docs/api/`
