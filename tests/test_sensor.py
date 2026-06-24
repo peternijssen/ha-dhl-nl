@@ -1,6 +1,6 @@
 """Tests for DHL sensor property logic."""
 from datetime import datetime, timezone
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -12,6 +12,7 @@ from custom_components.dhl_nl.coordinator import normalize_parcel
 from custom_components.dhl_nl.sensor import (
     DhlDeliveredParcelsSensor,
     DhlEnRouteToServicePointSensor,
+    DhlIncomingParcelsSensor,
     DhlNextDeliverySensor,
     DhlParcelSensor,
     DhlPickupPendingSensor,
@@ -72,6 +73,43 @@ def test_parcel_sensor_attributes_contain_full_parcel():
     parcel = _parcel(barcode="ABC")
     sensor = DhlParcelSensor(_make_coordinator([parcel]), USER_INFO, "ABC")
     assert sensor.extra_state_attributes == parcel
+
+
+# ---------------------------------------------------------------------------
+# DhlIncomingParcelsSensor — per-parcel sensor lifecycle
+# ---------------------------------------------------------------------------
+
+def test_summary_sensor_removes_stale_per_parcel_entity_from_registry():
+    """When a barcode falls out of coordinator data, the summary sensor must
+    remove the per-parcel entity from the registry. The previous self-remove
+    pattern raced with the coordinator-listener cleanup and could leave a
+    ghost entity behind (real-world repro on DHL).
+    """
+    coordinator = _make_coordinator([_parcel(barcode="A1")])
+    add_entities = MagicMock()
+    summary = DhlIncomingParcelsSensor(
+        coordinator=coordinator,
+        user_info=USER_INFO,
+        async_add_entities=add_entities,
+        known_barcodes={"A1", "A2"},
+    )
+    summary.hass = MagicMock()
+
+    registry = MagicMock()
+    registry.async_get_entity_id.return_value = "sensor.dhl_parcel_a2"
+
+    with patch(
+        "custom_components.dhl_nl.sensor.er.async_get",
+        return_value=registry,
+    ), patch.object(
+        DhlIncomingParcelsSensor.__bases__[0], "_handle_coordinator_update"
+    ):
+        summary._handle_coordinator_update()
+
+    registry.async_get_entity_id.assert_called_once_with(
+        "sensor", "dhl_nl", "user123_A2"
+    )
+    registry.async_remove.assert_called_once_with("sensor.dhl_parcel_a2")
 
 
 # ---------------------------------------------------------------------------
