@@ -299,6 +299,18 @@ def test_normalize_handles_missing_fields():
     assert result["pickup"] is False
     assert result["pickup_point"] is None
     assert result["url"] is None
+    assert result["weight"] is None
+    assert result["dimensions"] is None
+
+
+def test_normalize_always_carries_none_weight_and_dimensions_on_dhl():
+    """DHL doesn't expose weight/dimensions in any endpoint we know of, so the
+    canonical fields are always None — but they MUST be present so the
+    aggregator and cross-carrier cards can rely on the keys existing."""
+    parcel = {"barcode": "ABC", "category": "IN_DELIVERY", "destination": {}}
+    result = normalize_parcel(parcel)
+    assert "weight" in result and result["weight"] is None
+    assert "dimensions" in result and result["dimensions"] is None
 
 
 def test_normalize_constructs_tracking_url():

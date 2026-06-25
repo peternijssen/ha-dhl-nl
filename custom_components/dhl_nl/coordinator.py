@@ -117,7 +117,13 @@ def _tracking_url(parcel: dict) -> str | None:
 
 
 def normalize_parcel(parcel: dict) -> dict:
-    """Return a carrier-agnostic parcel dict with the original DHL payload under ``raw``."""
+    """Return a carrier-agnostic parcel dict with the original DHL payload under ``raw``.
+
+    ``weight`` and ``dimensions`` are part of the canonical shape every carrier
+    integration publishes but DHL does not expose them in any endpoint we know
+    of, so they are always ``None`` here. Aggregator and cross-carrier cards
+    can still rely on the keys being present.
+    """
     sender = parcel.get("sender") or {}
     receiver = parcel.get("receiver") or {}
     destination = parcel.get("destination") or {}
@@ -139,6 +145,8 @@ def normalize_parcel(parcel: dict) -> dict:
         "pickup": is_pickup,
         "pickup_point": destination.get("name") if is_pickup else None,
         "url": _tracking_url(parcel),
+        "weight": None,
+        "dimensions": None,
         "raw": parcel,
     }
 

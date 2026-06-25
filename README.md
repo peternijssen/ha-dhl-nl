@@ -122,6 +122,8 @@ Every parcel exposed on a sensor attribute uses a carrier-agnostic shape:
 | `pickup` | bool | Destined for a pickup point rather than a home address |
 | `pickup_point` | string \| null | ServicePoint name when `pickup` is true |
 | `url` | string \| null | Deep link to the parcel's tracking page |
+| `weight` | float \| null | Parcel weight in kilograms. Always `null` for DHL — the consumer API does not expose it. Present for shape parity with PostNL and DPD. |
+| `dimensions` | dict \| null | Parcel dimensions as `{height, width, length}` in centimeters. Always `null` for DHL — same reason as `weight`. |
 | `raw` | dict | The full original DHL API payload |
 
 This is the same shape that PostNL and DPD use, so the
