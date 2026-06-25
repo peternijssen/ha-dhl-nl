@@ -40,14 +40,28 @@
   "options": {
     "step": {
       "init": {
-        "title": "Bezorgde pakketten",
-        "data": {
-          "delivered_filter_type": "Filteren op",
-          "delivered_filter_amount": "Aantal"
-        },
-        "data_description": {
-          "delivered_filter_type": "Toon bezorgde pakketten van de afgelopen X dagen, of beperk tot de X meest recente.",
-          "delivered_filter_amount": "Aantal dagen of pakketten om weer te geven."
+        "title": "DHL opties",
+        "sections": {
+          "delivered": {
+            "name": "Bezorgde pakketten",
+            "data": {
+              "delivered_filter_type": "Filteren op",
+              "delivered_filter_amount": "Aantal"
+            },
+            "data_description": {
+              "delivered_filter_type": "Toon bezorgde pakketten van de afgelopen X dagen, of beperk tot de X meest recente.",
+              "delivered_filter_amount": "Aantal dagen of pakketten om weer te geven."
+            }
+          },
+          "polling": {
+            "name": "Verversen",
+            "data": {
+              "refresh_interval": "Elke"
+            },
+            "data_description": {
+              "refresh_interval": "Hoe vaak de integratie nieuwe parcel-informatie ophaalt. Een langer interval is vriendelijker voor DHL; de standaard van 30 minuten is voor de meeste pakketten ruim voldoende."
+            }
+          }
         }
       }
     }

@@ -14,10 +14,11 @@ from .const import (
     ACTIVE_CATEGORIES,
     CONF_DELIVERED_FILTER_AMOUNT,
     CONF_DELIVERED_FILTER_TYPE,
+    CONF_REFRESH_INTERVAL,
     DEFAULT_DELIVERED_FILTER_AMOUNT,
     DEFAULT_DELIVERED_FILTER_TYPE,
+    DEFAULT_REFRESH_INTERVAL,
     DOMAIN,
-    POLL_INTERVAL,
     STATUS_AT_SERVICE_POINT,
     STATUS_COLLECTED_AT_SERVICE_POINT,
     ParcelStatus,
@@ -52,6 +53,12 @@ _CATEGORY_MAP: dict[str, ParcelStatus] = {
 # Already-logged raw statuses so we surface each unmapped value only once
 # per HA session.
 _unmapped_statuses_logged: set[tuple[str, str]] = set()
+
+
+def _refresh_interval(entry: ConfigEntry) -> timedelta:
+    """Return the configured refresh interval as a ``timedelta``."""
+    minutes = int(entry.options.get(CONF_REFRESH_INTERVAL, DEFAULT_REFRESH_INTERVAL))
+    return timedelta(minutes=minutes)
 
 
 def map_parcel_status(parcel: dict) -> ParcelStatus:
@@ -198,14 +205,15 @@ class DhlCoordinator(DataUpdateCoordinator[list[dict]]):
         Args:
             hass: The Home Assistant instance.
             client: An authenticated :class:`DhlApiClient` instance.
-            entry: The config entry, used to read options for the delivered filter.
+            entry: The config entry, used to read options for the delivered
+                filter and the configured refresh interval.
         """
         super().__init__(
             hass,
             _LOGGER,
             config_entry=entry,
             name=DOMAIN,
-            update_interval=timedelta(seconds=POLL_INTERVAL),
+            update_interval=_refresh_interval(entry),
         )
         self._client = client
         self.delivered: list[dict] = []
@@ -317,18 +325,20 @@ class DhlCoordinator(DataUpdateCoordinator[list[dict]]):
 class DhlSentShipmentsCoordinator(DataUpdateCoordinator[list[dict]]):
     """Coordinator that polls the DHL sent shipments API on a fixed schedule."""
 
-    def __init__(self, hass: HomeAssistant, client: DhlApiClient) -> None:
+    def __init__(self, hass: HomeAssistant, client: DhlApiClient, entry: ConfigEntry) -> None:
         """Initialise the coordinator.
 
         Args:
             hass: The Home Assistant instance.
             client: An authenticated :class:`DhlApiClient` instance.
+            entry: The config entry, used to read the configured refresh interval.
         """
         super().__init__(
             hass,
             _LOGGER,
+            config_entry=entry,
             name=f"{DOMAIN}_sent",
-            update_interval=timedelta(seconds=POLL_INTERVAL),
+            update_interval=_refresh_interval(entry),
         )
         self._client = client
 

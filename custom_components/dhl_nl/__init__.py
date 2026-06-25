@@ -58,7 +58,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: DhlConfigEntry) -> bool:
         raise ConfigEntryNotReady("DHL login failed") from exc
 
     coordinator = DhlCoordinator(hass, client, entry)
-    sent_coordinator = DhlSentShipmentsCoordinator(hass, client)
+    sent_coordinator = DhlSentShipmentsCoordinator(hass, client, entry)
 
     entry.runtime_data = DhlData(
         client=client,
@@ -76,7 +76,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: DhlConfigEntry) -> bool:
 
 
 async def _async_update_options(hass: HomeAssistant, entry: DhlConfigEntry) -> None:
-    """Refresh the coordinator immediately when options are changed."""
+    """Apply the new options without an HA restart.
+
+    Picks up a changed refresh interval on both coordinators by reassigning
+    ``update_interval`` (the DataUpdateCoordinator base class re-schedules
+    from this attribute on the next tick) and triggers an immediate refresh
+    so the delivered-parcels filter change is reflected straight away.
+    """
+    from datetime import timedelta
+    from .const import CONF_REFRESH_INTERVAL, DEFAULT_REFRESH_INTERVAL
+
+    minutes = int(entry.options.get(CONF_REFRESH_INTERVAL, DEFAULT_REFRESH_INTERVAL))
+    new_interval = timedelta(minutes=minutes)
+    entry.runtime_data.coordinator.update_interval = new_interval
+    entry.runtime_data.sent_coordinator.update_interval = new_interval
     await entry.runtime_data.coordinator.async_request_refresh()
 
 

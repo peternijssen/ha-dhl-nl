@@ -64,13 +64,21 @@ A custom Home Assistant integration that tracks your incoming and outgoing DHL e
 
 ## Options
 
-Click **Configure** on the integration card to change the delivered
-parcels filter:
+Click **Configure** on the integration card. The form is split into two
+sections:
+
+### Delivered parcels
 
 | Option | Description |
 |---|---|
 | Filter by | `Days` keeps delivered parcels visible for the last N days. `Number of parcels` keeps only the N most recent regardless of age. |
 | Amount | The N used by the filter above. |
+
+### Polling
+
+| Option | Description |
+|---|---|
+| Refresh every | How often the integration checks DHL. Choices: **15 / 30 / 60 / 120 / 240 minutes** — default 30. A slower interval is gentler on DHL's consumer API. Changes take effect immediately, no HA restart needed. |
 
 ## Removal
 

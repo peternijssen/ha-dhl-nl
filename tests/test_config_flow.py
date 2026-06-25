@@ -12,6 +12,7 @@ from custom_components.dhl_nl.api import DhlAuthError
 from custom_components.dhl_nl.const import (
     CONF_DELIVERED_FILTER_AMOUNT,
     CONF_DELIVERED_FILTER_TYPE,
+    CONF_REFRESH_INTERVAL,
     DOMAIN,
 )
 
@@ -113,8 +114,13 @@ async def test_user_flow_aborts_when_already_configured(hass):
 
 
 @pytest.mark.asyncio
-async def test_options_flow_updates_filter(hass):
-    """Options flow updates the delivered filter settings."""
+async def test_options_flow_updates_filter_and_refresh_interval(hass):
+    """Options flow updates the delivered filter settings and refresh interval.
+
+    The form is split into ``delivered`` and ``polling`` sections so HA returns
+    the user input nested by section name; the handler flattens it before
+    storing on the entry.
+    """
     from pytest_homeassistant_custom_component.common import MockConfigEntry
 
     entry = MockConfigEntry(
@@ -135,13 +141,19 @@ async def test_options_flow_updates_filter(hass):
     result = await hass.config_entries.options.async_configure(
         result["flow_id"],
         user_input={
-            CONF_DELIVERED_FILTER_TYPE: "parcels",
-            CONF_DELIVERED_FILTER_AMOUNT: 30,
+            "delivered": {
+                CONF_DELIVERED_FILTER_TYPE: "parcels",
+                CONF_DELIVERED_FILTER_AMOUNT: 30,
+            },
+            "polling": {
+                CONF_REFRESH_INTERVAL: "60",
+            },
         },
     )
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert result["data"][CONF_DELIVERED_FILTER_TYPE] == "parcels"
     assert result["data"][CONF_DELIVERED_FILTER_AMOUNT] == 30
+    assert result["data"][CONF_REFRESH_INTERVAL] == 60
 
 
 @pytest.mark.asyncio

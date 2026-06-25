@@ -29,12 +29,20 @@ LOGIN_URL = "https://my.dhlecommerce.nl/api/user/login"
 PARCELS_URL = "https://my.dhlecommerce.nl/receiver-parcel-api/parcels"
 SENT_SHIPMENTS_URL = "https://my.dhlecommerce.nl/api/orders/sentShipments?max=250"
 
-POLL_INTERVAL = 900  # seconds (15 minutes)
+POLL_INTERVAL = 900  # seconds (15 minutes) — legacy hard-coded fallback
 
 CONF_DELIVERED_FILTER_TYPE = "delivered_filter_type"
 CONF_DELIVERED_FILTER_AMOUNT = "delivered_filter_amount"
 DEFAULT_DELIVERED_FILTER_TYPE = "days"
 DEFAULT_DELIVERED_FILTER_AMOUNT = 7
+
+# Refresh interval (minutes) controls how often the coordinator polls DHL.
+# Default 30 min keeps the load on the consumer API gentle; the minimum is
+# 15 min for the same reason (parcel status rarely changes faster). Maximum
+# 240 min (4h) is the "I just want one or two checks a day" knob.
+CONF_REFRESH_INTERVAL = "refresh_interval"
+REFRESH_INTERVAL_OPTIONS = (15, 30, 60, 120, 240)
+DEFAULT_REFRESH_INTERVAL = 30
 
 # All categories that indicate a shipment is still active (not yet delivered).
 # Applies to both incoming parcels and outgoing sent shipments.

@@ -11,6 +11,7 @@ import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry, ConfigFlow, ConfigFlowResult, OptionsFlow
 from homeassistant.const import CONF_EMAIL, CONF_PASSWORD
 from homeassistant.core import callback
+from homeassistant.data_entry_flow import section
 from homeassistant.helpers import selector
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
@@ -18,9 +19,12 @@ from .api import DhlApiClient, DhlAuthError
 from .const import (
     CONF_DELIVERED_FILTER_AMOUNT,
     CONF_DELIVERED_FILTER_TYPE,
+    CONF_REFRESH_INTERVAL,
     DEFAULT_DELIVERED_FILTER_AMOUNT,
     DEFAULT_DELIVERED_FILTER_TYPE,
+    DEFAULT_REFRESH_INTERVAL,
     DOMAIN,
+    REFRESH_INTERVAL_OPTIONS,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -158,7 +162,13 @@ class DhlConfigFlow(ConfigFlow, domain=DOMAIN):
 
 
 class DhlOptionsFlowHandler(OptionsFlow):
-    """Handle DHL options (delivered parcels filter).
+    """Handle DHL options — delivered-parcels filter plus polling cadence.
+
+    The form is rendered with two collapsible sections (``delivered`` and
+    ``polling``) so the unrelated knobs don't compete for attention. HA
+    returns the user input nested by section name; we flatten it before
+    storing on the config entry so the coordinator can keep reading the
+    flat keys directly.
 
     Modern HA exposes ``self.config_entry`` on ``OptionsFlow`` automatically,
     so no constructor is needed to store it.
@@ -169,11 +179,14 @@ class DhlOptionsFlowHandler(OptionsFlow):
     ) -> ConfigFlowResult:
         """Show the options form."""
         if user_input is not None:
+            delivered = user_input.get("delivered", {})
+            polling = user_input.get("polling", {})
             return self.async_create_entry(
                 title="",
                 data={
-                    CONF_DELIVERED_FILTER_TYPE: user_input[CONF_DELIVERED_FILTER_TYPE],
-                    CONF_DELIVERED_FILTER_AMOUNT: int(user_input[CONF_DELIVERED_FILTER_AMOUNT]),
+                    CONF_DELIVERED_FILTER_TYPE: delivered[CONF_DELIVERED_FILTER_TYPE],
+                    CONF_DELIVERED_FILTER_AMOUNT: int(delivered[CONF_DELIVERED_FILTER_AMOUNT]),
+                    CONF_REFRESH_INTERVAL: int(polling[CONF_REFRESH_INTERVAL]),
                 },
             )
 
@@ -182,28 +195,63 @@ class DhlOptionsFlowHandler(OptionsFlow):
             step_id="init",
             data_schema=vol.Schema(
                 {
-                    vol.Required(
-                        CONF_DELIVERED_FILTER_TYPE,
-                        default=current.get(CONF_DELIVERED_FILTER_TYPE, DEFAULT_DELIVERED_FILTER_TYPE),
-                    ): selector.SelectSelector(
-                        selector.SelectSelectorConfig(
-                            options=[
-                                selector.SelectOptionDict(value="days", label="Days"),
-                                selector.SelectOptionDict(value="parcels", label="Number of parcels"),
-                            ],
-                            mode=selector.SelectSelectorMode.LIST,
-                        )
+                    vol.Required("delivered"): section(
+                        vol.Schema(
+                            {
+                                vol.Required(
+                                    CONF_DELIVERED_FILTER_TYPE,
+                                    default=current.get(
+                                        CONF_DELIVERED_FILTER_TYPE,
+                                        DEFAULT_DELIVERED_FILTER_TYPE,
+                                    ),
+                                ): selector.SelectSelector(
+                                    selector.SelectSelectorConfig(
+                                        options=[
+                                            selector.SelectOptionDict(value="days", label="Days"),
+                                            selector.SelectOptionDict(value="parcels", label="Number of parcels"),
+                                        ],
+                                        mode=selector.SelectSelectorMode.LIST,
+                                    )
+                                ),
+                                vol.Required(
+                                    CONF_DELIVERED_FILTER_AMOUNT,
+                                    default=current.get(
+                                        CONF_DELIVERED_FILTER_AMOUNT,
+                                        DEFAULT_DELIVERED_FILTER_AMOUNT,
+                                    ),
+                                ): selector.NumberSelector(
+                                    selector.NumberSelectorConfig(
+                                        min=1,
+                                        max=365,
+                                        step=1,
+                                        mode=selector.NumberSelectorMode.BOX,
+                                    )
+                                ),
+                            }
+                        ),
+                        {"collapsed": False},
                     ),
-                    vol.Required(
-                        CONF_DELIVERED_FILTER_AMOUNT,
-                        default=current.get(CONF_DELIVERED_FILTER_AMOUNT, DEFAULT_DELIVERED_FILTER_AMOUNT),
-                    ): selector.NumberSelector(
-                        selector.NumberSelectorConfig(
-                            min=1,
-                            max=365,
-                            step=1,
-                            mode=selector.NumberSelectorMode.BOX,
-                        )
+                    vol.Required("polling"): section(
+                        vol.Schema(
+                            {
+                                vol.Required(
+                                    CONF_REFRESH_INTERVAL,
+                                    default=current.get(
+                                        CONF_REFRESH_INTERVAL,
+                                        DEFAULT_REFRESH_INTERVAL,
+                                    ),
+                                ): selector.SelectSelector(
+                                    selector.SelectSelectorConfig(
+                                        options=[
+                                            selector.SelectOptionDict(value=str(m), label=f"{m} minutes")
+                                            for m in REFRESH_INTERVAL_OPTIONS
+                                        ],
+                                        mode=selector.SelectSelectorMode.DROPDOWN,
+                                    )
+                                ),
+                            }
+                        ),
+                        {"collapsed": True},
                     ),
                 }
             ),

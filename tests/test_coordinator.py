@@ -12,6 +12,7 @@ from custom_components.dhl_nl.const import (
 )
 from custom_components.dhl_nl.coordinator import (
     DhlCoordinator,
+    _refresh_interval,
     filter_active_parcels,
     filter_active_sent_shipments,
     filter_delivered_parcels,
@@ -447,6 +448,23 @@ async def test_status_changed_event_when_active_status_transitions(hass):
     assert changed[0]["barcode"] == "A"
     assert changed[0]["old_status"] == ParcelStatus.REGISTERED
     assert changed[0]["new_status"] == ParcelStatus.OUT_FOR_DELIVERY
+
+
+# ---------------------------------------------------------------------------
+# _refresh_interval
+# ---------------------------------------------------------------------------
+
+
+def test_refresh_interval_defaults_to_30_minutes_when_option_unset():
+    entry = MagicMock()
+    entry.options = {}
+    assert _refresh_interval(entry).total_seconds() == 30 * 60
+
+
+def test_refresh_interval_reads_minutes_from_options():
+    entry = MagicMock()
+    entry.options = {"refresh_interval": 60}
+    assert _refresh_interval(entry).total_seconds() == 60 * 60
 
 
 # ---------------------------------------------------------------------------
