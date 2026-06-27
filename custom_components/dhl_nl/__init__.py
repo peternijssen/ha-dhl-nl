@@ -70,27 +70,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: DhlConfigEntry) -> bool:
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
-    entry.async_on_unload(entry.add_update_listener(_async_update_options))
-
     return True
-
-
-async def _async_update_options(hass: HomeAssistant, entry: DhlConfigEntry) -> None:
-    """Apply the new options without an HA restart.
-
-    Picks up a changed refresh interval on both coordinators by reassigning
-    ``update_interval`` (the DataUpdateCoordinator base class re-schedules
-    from this attribute on the next tick) and triggers an immediate refresh
-    so the delivered-parcels filter change is reflected straight away.
-    """
-    from datetime import timedelta
-    from .const import CONF_REFRESH_INTERVAL, DEFAULT_REFRESH_INTERVAL
-
-    minutes = int(entry.options.get(CONF_REFRESH_INTERVAL, DEFAULT_REFRESH_INTERVAL))
-    new_interval = timedelta(minutes=minutes)
-    entry.runtime_data.coordinator.update_interval = new_interval
-    entry.runtime_data.sent_coordinator.update_interval = new_interval
-    await entry.runtime_data.coordinator.async_request_refresh()
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: DhlConfigEntry) -> bool:
