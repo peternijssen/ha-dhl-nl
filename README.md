@@ -165,7 +165,7 @@ polling per-parcel sensors.
 
 | Event | When | Payload |
 |---|---|---|
-| `dhl_nl_parcel_registered` | A new barcode appears in the active list | The full normalised parcel dict (`barcode`, `sender`, `receiver`, `status`, `raw_status`, `delivered`, `delivered_at`, `planned_from`, `planned_to`, `pickup`, `pickup_point`, `url`, `raw`) |
+| `dhl_nl_parcel_registered` | A new barcode appears in the active list | The full normalised parcel dict (`carrier`, `barcode`, `sender`, `receiver`, `status`, `raw_status`, `delivered`, `delivered_at`, `planned_from`, `planned_to`, `pickup`, `pickup_point`, `url`, `weight`, `dimensions`, `raw`) |
 | `dhl_nl_parcel_status_changed` | A known barcode's normalised `status` value changes | Same payload as above plus `old_status` and `new_status` |
 
 The coordinator suppresses events on the very first refresh after start-up
@@ -186,19 +186,9 @@ nicely with this integration's sensors:
 
 - [jonisnet/hki-parcels-card](https://github.com/jonisnet/hki-parcels-card) — multi-carrier (PostNL, DHL, DPD) Home Kit-style card with Onderweg/Bezorgd/Verzonden/Post tabs.
 - [klaptafel/ha-package-tracker-card](https://github.com/klaptafel/ha-package-tracker-card) — purpose-built card for parcel integrations; renders each parcel with sender, status and tracking link.
+- [jimz011/hki-elements](https://github.com/jimz011/hki-elements) — original PostNL Home Kit-style card that hki-parcels-card was forked from.
 
-Both are maintained by their respective authors — please raise UI issues
-in those repos.
-
-### Community Lovelace cards
-
-If you want a richer UI than the snippets above, two third-party cards
-work nicely with this integration's sensors:
-
-- [klaptafel/ha-package-tracker-card](https://github.com/klaptafel/ha-package-tracker-card) — purpose-built card for parcel integrations; renders each parcel with sender, status and tracking link.
-- [jimz011/hki-elements](https://github.com/jimz011/hki-elements) — collection of Home Kit-style elements that pair well with the per-parcel sensors for a cleaner dashboard.
-
-Both are maintained by their respective authors — please raise UI issues
+All maintained by their respective authors — please raise UI issues
 in those repos.
 
 ## Debugging

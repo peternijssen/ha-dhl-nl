@@ -43,7 +43,11 @@ re-propose these as improvements:
 - `PARALLEL_UPDATES = 0` in `sensor.py`
 - Coordinator takes `config_entry=entry` so `self.config_entry` is
   available on the base class
-- Per-parcel sensors self-remove via `async_remove(force_remove=True)`
+- Per-parcel sensors are removed by the summary sensor
+  (`DhlIncomingParcelsSensor`) via `entity_registry.async_remove(entity_id)`
+  when a barcode drops out of the coordinator data. The earlier
+  self-remove pattern raced with coordinator-listener cleanup and left
+  ghost entities behind — do not revert.
 - Reauth flow uses `async_update_reload_and_abort` (one helper call
   instead of update + reload + abort)
 - `aiohttp.ClientError` is intentionally not caught in the coordinator —
@@ -79,6 +83,27 @@ re-propose these as improvements:
 - **Device name pattern**: `"DHL (<email>)"`. Sensors auto-prefix with
   this, yielding friendly names like
   `DHL (account@example.com) Incoming parcels`.
+
+### Adopted in 2.1.0 (do not refactor away)
+
+- **Carrier-agnostic `receiver`, `weight`, `dimensions`** on every
+  parcel. `receiver` is sourced from DHL's `receiver.name`; `weight` and
+  `dimensions` stay `None` here because DHL's consumer API does not
+  expose them — kept on the shape for parity with DPD and PostNL so the
+  aggregator and cross-carrier dashboards can read every carrier the
+  same way.
+- **Configurable refresh interval** via the options flow
+  (`CONF_REFRESH_INTERVAL`; 15, 30, 60, 120 or 240 minutes; default 30).
+  The form is split into `delivered` and `polling` sections via
+  `data_entry_flow.section`.
+- **No `entry.add_update_listener`** — the OptionsFlow calls
+  `self.hass.config_entries.async_schedule_reload(entry.entry_id)` on
+  submit so a changed refresh interval takes effect immediately. Reauth
+  still reloads via `async_update_reload_and_abort` (that is correct and
+  unrelated). Combining an update listener with a reload-on-update flow
+  is logged as a deprecation today and becomes an error in HA 2026.12+ —
+  see the
+  [config_entry_listener deprecation](https://developers.home-assistant.io/blog/2026/05/07/config-entry-listener-together-with-reloading-methods/).
 
 ## Planned for the next major bump
 
