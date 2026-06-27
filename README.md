@@ -122,9 +122,9 @@ Every parcel exposed on a sensor attribute uses a carrier-agnostic shape:
 | `pickup` | bool | Destined for a pickup point rather than a home address |
 | `pickup_point` | string \| null | ServicePoint name when `pickup` is true |
 | `url` | string \| null | Deep link to the parcel's tracking page |
-| `weight` | float \| null | Parcel weight in kilograms. Always `null` for DHL — the consumer API does not expose it. Present for shape parity with PostNL and DPD. |
-| `dimensions` | dict \| null | Parcel dimensions in centimeters: `{length, width, height, text}` where `text` is a pre-formatted `"L x W x H cm"` string. Always `null` for DHL — same reason as `weight`. |
-| `raw` | dict | The full original DHL API payload |
+| `weight` | float \| null | Parcel weight in kilograms. Always `null` for DHL — the API does not expose it. |
+| `dimensions` | dict \| null | Parcel dimensions in centimeters. Always `null` for DHL — same reason as `weight`. |
+| `raw` | dict | The original DHL API payload |
 
 This is the same shape that PostNL and DPD use, so the
 [parcel aggregator](https://github.com/peternijssen/ha-parcel-aggregator)
@@ -165,13 +165,11 @@ polling per-parcel sensors.
 
 | Event | When | Payload |
 |---|---|---|
-| `dhl_nl_parcel_registered` | A new barcode appears in the active list | The full normalised parcel dict (`carrier`, `barcode`, `sender`, `receiver`, `status`, `raw_status`, `delivered`, `delivered_at`, `planned_from`, `planned_to`, `pickup`, `pickup_point`, `url`, `weight`, `dimensions`, `raw`) |
-| `dhl_nl_parcel_status_changed` | A known barcode's normalised `status` value changes | Same payload as above plus `old_status` and `new_status` |
-| `dhl_nl_parcel_delivery_time_changed` | A known barcode's `planned_from` or `planned_to` ends up with a non-null value that differs from the previous one. Value-to-null transitions are intentionally silent. | Same payload as above plus `old_planned_from`, `new_planned_from`, `old_planned_to`, `new_planned_to` |
+| `dhl_nl_parcel_registered` | A new barcode appears in the active list | The full parcel dict (see the table above) |
+| `dhl_nl_parcel_status_changed` | A known barcode's `status` value changes | Same payload plus `old_status` and `new_status` |
+| `dhl_nl_parcel_delivery_time_changed` | A known barcode's expected delivery time changes to a new value | Same payload plus `old_planned_from`, `new_planned_from`, `old_planned_to`, `new_planned_to` |
 
-The coordinator suppresses events on the very first refresh after start-up
-so you don't get a stampede of "registered" events for parcels that were
-already in your account before HA started.
+Events do not fire for parcels that were already in your account when HA first started.
 
 See [`examples/automations/`](examples/automations/) for ready-to-paste
 event-driven automations.
