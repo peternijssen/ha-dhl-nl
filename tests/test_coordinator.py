@@ -9,6 +9,7 @@ from custom_components.dhl_nl.const import (
     ACTIVE_CATEGORIES,
     CONF_DELIVERED_FILTER_AMOUNT,
     CONF_DELIVERED_FILTER_TYPE,
+    ParcelStatus,
 )
 from custom_components.dhl_nl.coordinator import (
     DhlCoordinator,
@@ -16,6 +17,7 @@ from custom_components.dhl_nl.coordinator import (
     filter_active_parcels,
     filter_active_sent_shipments,
     filter_delivered_parcels,
+    map_parcel_status,
     normalize_parcel,
     sort_parcels_by_ts,
 )
@@ -50,6 +52,29 @@ def _parcel(
 # ---------------------------------------------------------------------------
 # filter_active_parcels
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# map_parcel_status
+# ---------------------------------------------------------------------------
+
+
+def test_receiver_reschedule_maps_to_in_transit_not_problem():
+    """A receiver-requested reschedule is benign — it must not show as PROBLEM.
+
+    The specific raw status takes precedence over the INTERVENTION category.
+    """
+    parcel = {
+        "status": "INTERVENTION_RECEIVER_REQUESTS_DELIVERY_AT_ANOTHER_TIME/DATE",
+        "category": "INTERVENTION",
+    }
+    assert map_parcel_status(parcel) == ParcelStatus.IN_TRANSIT
+
+
+def test_other_intervention_still_maps_to_problem():
+    """Unmapped INTERVENTION statuses still fall back to PROBLEM via category."""
+    parcel = {"status": "INTERVENTION_PARCEL_DAMAGED", "category": "INTERVENTION"}
+    assert map_parcel_status(parcel) == ParcelStatus.PROBLEM
 
 
 def test_active_parcel_is_included():

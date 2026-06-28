@@ -32,6 +32,10 @@ _STATUS_MAP: dict[str, ParcelStatus] = {
     STATUS_AT_SERVICE_POINT: ParcelStatus.AT_PICKUP_POINT,
     STATUS_COLLECTED_AT_SERVICE_POINT: ParcelStatus.DELIVERED,
     "OUT_FOR_DELIVERY": ParcelStatus.OUT_FOR_DELIVERY,
+    # Receiver asked for delivery at another time/date — benign, the parcel
+    # is still on its way. Mapped explicitly so it does not fall through to
+    # the INTERVENTION category, which would mislabel it as PROBLEM.
+    "INTERVENTION_RECEIVER_REQUESTS_DELIVERY_AT_ANOTHER_TIME/DATE": ParcelStatus.IN_TRANSIT,
 }
 
 # DHL category (high-level state) → canonical ParcelStatus. Used as a
