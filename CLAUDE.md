@@ -114,6 +114,56 @@ re-propose these as improvements:
   see the
   [config_entry_listener deprecation](https://developers.home-assistant.io/blog/2026/05/07/config-entry-listener-together-with-reloading-methods/).
 
+### Adopted in 2.3.0 — history (do not refactor away)
+
+- **Per-parcel `history`** — a new top-level canonical field (alongside
+  `status`, `raw_status`, …): an ordered list (oldest → newest) of
+  `{timestamp, status, raw_status}` events, capped to the most recent
+  `HISTORY_MAX_EVENTS` (20). DHL has no human event text, so a history
+  entry's `raw_status` is the event **`key`** (a code), mirroring how the
+  parcel-level `raw_status` is the carrier's own status string. Kept
+  identical across DHL / DPD / PostNL; top-level (not under `raw`) so it
+  survives the aggregator's `strip_raw()`.
+- **New API call** — history is NOT on the parcels list endpoint. It
+  comes from the track-trace endpoint (`TRACK_TRACE_URL`), added as
+  `DhlApiClient.async_get_track_trace(barcode, postal_code, parcel_id)`.
+  Query: `key={barcode}+{postalCode}` (yarl encodes `+` → `%2B`),
+  `role=consumer-receiver`, `uuid={parcelId}`. The postcode is the
+  **receiver's** (`parcel.receiver.address.postalCode`), the uuid is
+  `parcel.parcelId` — both from the list endpoint. The response is
+  `text/plain`, so the client parses with `json.loads(await r.text())`,
+  not `r.json()`. Best-effort: any failure returns `None` and never
+  breaks the poll.
+- **Opt-in, default OFF.** Options-flow boolean `CONF_INCLUDE_HISTORY`
+  in its own `history` section, `async_schedule_reload` on submit (same
+  pattern as `CONF_REFRESH_INTERVAL`). When off, `history` is `None` —
+  the key is never omitted.
+- **Cost control via `_history_cache`** (`barcode -> {history,
+  _raw_status}`). `_enrich_history` runs only when the option is on, for
+  **active + delivered** incoming parcels, and only calls track-trace on
+  first sight of a barcode or when its raw `status` changes (history
+  grows on a status change). Mirrors DPD's detail-cache thinking; the
+  cache lives for the integration's lifetime (resets on HA restart). The
+  sent-shipments coordinator does NOT fetch history — track-trace is a
+  receiver-role endpoint; outgoing shipments keep `history = None`.
+- **Per-event status reuses the parcel maps.** `map_event_status(key,
+  phase)` tries `_STATUS_MAP[key]` (granular, more specific) then
+  `_CATEGORY_MAP[phase]` (the DHL `phase` shares the `category`
+  vocabulary). The phase fallback covers essentially every event, so we
+  did NOT extend `_STATUS_MAP` with granular per-event keys (keeps
+  `map_parcel_status` untouched). Unmapped → `null` (history) + one-shot
+  warning.
+- **Feature B — unknown-status warnings.** Both `map_parcel_status`
+  (`[parcel] status=… category=…`) and `map_event_status` (`[history]
+  key=… phase=…`) log **once per distinct unmapped value** at **WARNING**
+  with a copy-paste `issues/new` link (`_NEW_ISSUE_URL`). Replaced the
+  old terse info log. Two one-shot sets: `_unmapped_statuses_logged`,
+  `_unmapped_event_keys_logged`.
+- **Recorder:** `history` is in `_unrecorded_attributes` on
+  `DhlParcelSensor`. Summary sensors already keep the parcel list out of
+  the recorder via the `parcels` attribute. Observed event-key catalogue
+  lives in `docs/api/track_trace.md` (local-only).
+
 ## Planned for the next major bump
 
 - **Exception translations** (Gold-tier rule). `UpdateFailed(f"...")`

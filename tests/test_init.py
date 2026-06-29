@@ -12,6 +12,7 @@ from custom_components.dhl_nl.api import DhlAuthError
 from custom_components.dhl_nl.const import (
     CONF_DELIVERED_FILTER_AMOUNT,
     CONF_DELIVERED_FILTER_TYPE,
+    CONF_INCLUDE_HISTORY,
     CONF_REFRESH_INTERVAL,
     DEFAULT_REFRESH_INTERVAL,
     DOMAIN,
@@ -152,6 +153,9 @@ async def test_options_flow_schedules_reload(hass):
                 "delivered": {
                     CONF_DELIVERED_FILTER_TYPE: "parcels",
                     CONF_DELIVERED_FILTER_AMOUNT: 14,
+                },
+                "history": {
+                    CONF_INCLUDE_HISTORY: False,
                 },
                 "polling": {
                     CONF_REFRESH_INTERVAL: str(DEFAULT_REFRESH_INTERVAL),

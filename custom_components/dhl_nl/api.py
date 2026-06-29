@@ -2,12 +2,21 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from typing import Any
 
 import aiohttp
 
-from .const import COOKIE_XSRF, HEADER_XSRF, LOGIN_URL, PARCELS_URL, SENT_SHIPMENTS_URL
+from .const import (
+    COOKIE_XSRF,
+    HEADER_XSRF,
+    LOGIN_URL,
+    PARCELS_URL,
+    SENT_SHIPMENTS_URL,
+    TRACK_TRACE_ROLE,
+    TRACK_TRACE_URL,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -104,6 +113,40 @@ class DhlApiClient:
             return data if isinstance(data, list) else []
 
         return await self._async_call_with_reauth(_fetch)
+
+    async def async_get_track_trace(
+        self, barcode: str, postal_code: str, parcel_id: str
+    ) -> list[dict[str, Any]] | None:
+        """Fetch a parcel's track-and-trace timeline. Best-effort: ``None`` on failure.
+
+        Backs the opt-in history feature. The endpoint authenticates with the
+        same cookies as the parcels call, but returns its JSON body with a
+        ``text/plain`` mimetype — so the body is parsed with ``json.loads``
+        rather than ``response.json()``. ``yarl`` URL-encodes the ``+`` in the
+        ``key`` parameter to ``%2B`` as the endpoint expects. Any failure
+        (non-200, network error, malformed body) yields ``None`` so a broken
+        history call never breaks the main parcels poll.
+        """
+        params = {
+            "key": f"{barcode}+{postal_code}",
+            "role": TRACK_TRACE_ROLE,
+            "uuid": parcel_id,
+        }
+
+        async def _fetch() -> list[dict[str, Any]]:
+            headers = self._xsrf_headers()
+            async with self._session.get(
+                TRACK_TRACE_URL, params=params, headers=headers
+            ) as response:
+                if response.status != 200:
+                    raise DhlApiError(response.status)
+                text = await response.text()
+            return json.loads(text)
+
+        try:
+            return await self._async_call_with_reauth(_fetch)
+        except (DhlApiError, aiohttp.ClientError, ValueError):
+            return None
 
     @property
     def user_info(self) -> dict[str, Any] | None:

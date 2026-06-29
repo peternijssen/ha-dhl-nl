@@ -28,6 +28,12 @@ PLATFORMS = [Platform.SENSOR]
 LOGIN_URL = "https://my.dhlecommerce.nl/api/user/login"
 PARCELS_URL = "https://my.dhlecommerce.nl/receiver-parcel-api/parcels"
 SENT_SHIPMENTS_URL = "https://my.dhlecommerce.nl/api/orders/sentShipments?max=250"
+# Per-parcel track-and-trace timeline. Backs the phase/event history used by
+# the opt-in history feature. Returns a JSON array with a ``text/plain``
+# mimetype, so the client parses the body with ``json.loads`` rather than
+# ``response.json()``.
+TRACK_TRACE_URL = "https://my.dhlecommerce.nl/receiver-parcel-api/track-trace"
+TRACK_TRACE_ROLE = "consumer-receiver"
 
 POLL_INTERVAL = 900  # seconds (15 minutes) — legacy hard-coded fallback
 
@@ -43,6 +49,12 @@ DEFAULT_DELIVERED_FILTER_AMOUNT = 7
 CONF_REFRESH_INTERVAL = "refresh_interval"
 REFRESH_INTERVAL_OPTIONS = (15, 30, 60, 120, 240)
 DEFAULT_REFRESH_INTERVAL = 30
+
+CONF_INCLUDE_HISTORY = "include_history"
+DEFAULT_INCLUDE_HISTORY = False
+# Cap each parcel's history to the most recent N events so the attribute
+# stays well under HA's ~16 KB state-attribute limit.
+HISTORY_MAX_EVENTS = 20
 
 # All categories that indicate a shipment is still active (not yet delivered).
 # Applies to both incoming parcels and outgoing sent shipments.

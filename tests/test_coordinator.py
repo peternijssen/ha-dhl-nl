@@ -9,25 +9,35 @@ from custom_components.dhl_nl.const import (
     ACTIVE_CATEGORIES,
     CONF_DELIVERED_FILTER_AMOUNT,
     CONF_DELIVERED_FILTER_TYPE,
+    CONF_INCLUDE_HISTORY,
     ParcelStatus,
 )
 from custom_components.dhl_nl.coordinator import (
     DhlCoordinator,
+    _extract_events,
     _refresh_interval,
+    build_history,
     filter_active_parcels,
     filter_active_sent_shipments,
     filter_delivered_parcels,
+    map_event_status,
     map_parcel_status,
     normalize_parcel,
     sort_parcels_by_ts,
 )
 
 
-def _mock_entry(filter_type: str = "days", filter_amount: int = 7) -> MagicMock:
+def _mock_entry(
+    filter_type: str = "days",
+    filter_amount: int = 7,
+    *,
+    include_history: bool = False,
+) -> MagicMock:
     entry = MagicMock()
     entry.options = {
         CONF_DELIVERED_FILTER_TYPE: filter_type,
         CONF_DELIVERED_FILTER_AMOUNT: filter_amount,
+        CONF_INCLUDE_HISTORY: include_history,
     }
     return entry
 
@@ -654,3 +664,235 @@ def test_sort_handles_z_suffix_timestamps():
 
 def test_sort_empty_input_returns_empty_list():
     assert sort_parcels_by_ts([], "planned_from") == []
+
+
+# ---------------------------------------------------------------------------
+# map_event_status — reuses the parcel maps (status key, then phase)
+# ---------------------------------------------------------------------------
+
+
+def test_map_event_status_granular_key_wins():
+    # OUT_FOR_DELIVERY is in _STATUS_MAP; the phase would only give in_transit.
+    assert map_event_status("OUT_FOR_DELIVERY", "IN_DELIVERY") == ParcelStatus.OUT_FOR_DELIVERY
+
+
+def test_map_event_status_falls_back_to_phase():
+    # PARCEL_SORTED_AT_HUB isn't in _STATUS_MAP → phase UNDERWAY → in_transit.
+    assert map_event_status("PARCEL_SORTED_AT_HUB", "UNDERWAY") == ParcelStatus.IN_TRANSIT
+    assert map_event_status("PRENOTIFICATION_RECEIVED", "DATA_RECEIVED") == ParcelStatus.REGISTERED
+    assert map_event_status("DELIVERED", "DELIVERED") == ParcelStatus.DELIVERED
+
+
+def test_map_event_status_pickup_point_key():
+    assert map_event_status(
+        "NOTIFICATION_FOR_PARCELSHOP_COLLECTION_HAS_BEEN_SENT", "IN_DELIVERY"
+    ) == ParcelStatus.AT_PICKUP_POINT
+
+
+def test_map_event_status_none_for_unmapped(caplog):
+    assert map_event_status("WARP_DRIVE_ENGAGED", "ZZTOP") is None
+    assert "WARP_DRIVE_ENGAGED" in caplog.text
+    assert "issues/new" in caplog.text
+
+
+# ---------------------------------------------------------------------------
+# _extract_events / build_history
+# ---------------------------------------------------------------------------
+
+
+_TRACK_TRACE = [
+    {
+        "id": "uuid-1",
+        "barcode": "JX1",
+        "view": {
+            "phases": [
+                # DHL returns phases newest-first.
+                {"phase": "DELIVERED", "events": [
+                    {"timestamp": "2026-06-24T17:23:13Z", "key": "DELIVERED", "exception": False},
+                ]},
+                {"phase": "IN_DELIVERY", "events": [
+                    {"timestamp": "2026-06-24T15:17:49Z", "key": "OUT_FOR_DELIVERY", "exception": False},
+                ]},
+                {"phase": "UNDERWAY", "events": [
+                    {"timestamp": "2026-06-24T12:18:34Z", "key": "PARCEL_ARRIVED_AT_LOCAL_DEPOT", "exception": False},
+                    {"timestamp": "2026-06-24T02:00:00Z", "key": "PARCEL_SORTED_AT_HUB", "exception": False},
+                ]},
+                {"phase": "DATA_RECEIVED", "events": [
+                    {"timestamp": "2026-06-23T11:05:01Z", "key": "PRENOTIFICATION_RECEIVED", "exception": False},
+                ]},
+            ],
+        },
+    }
+]
+
+
+def test_extract_events_flattens_phases_with_phase_tag():
+    pairs = _extract_events(_TRACK_TRACE)
+    assert len(pairs) == 5
+    # Each event carries its parent phase.
+    assert all(phase for _, phase in pairs)
+    assert ("DELIVERED" in (phase for _, phase in pairs))
+
+
+def test_extract_events_empty_for_falsy_or_shapeless():
+    assert _extract_events(None) == []
+    assert _extract_events([]) == []
+    assert _extract_events([{"view": {}}]) == []
+
+
+def test_build_history_orders_oldest_first_and_maps():
+    history = build_history(_TRACK_TRACE)
+    assert [e["status"] for e in history] == [
+        ParcelStatus.REGISTERED,
+        ParcelStatus.IN_TRANSIT,
+        ParcelStatus.IN_TRANSIT,
+        ParcelStatus.OUT_FOR_DELIVERY,
+        ParcelStatus.DELIVERED,
+    ]
+    # raw_status is the event key (DHL has no human event text).
+    assert history[0]["raw_status"] == "PRENOTIFICATION_RECEIVED"
+    assert history[-1]["raw_status"] == "DELIVERED"
+    assert set(history[0]) == {"timestamp", "status", "raw_status"}
+
+
+def test_build_history_caps_to_max_events():
+    events = [
+        {"timestamp": f"2026-06-{day:02d}T10:00:00Z", "key": "PARCEL_SORTED_AT_HUB", "exception": False}
+        for day in range(1, 26)
+    ]
+    track_trace = [{"view": {"phases": [{"phase": "UNDERWAY", "events": events}]}}]
+    history = build_history(track_trace)
+    assert len(history) == 20
+    assert history[0]["timestamp"] == "2026-06-06T10:00:00Z"
+
+
+def test_build_history_respects_custom_cap():
+    assert len(build_history(_TRACK_TRACE, max_events=2)) == 2
+
+
+def test_build_history_skips_events_without_timestamp():
+    track_trace = [{"view": {"phases": [{"phase": "UNDERWAY", "events": [
+        {"key": "PARCEL_SORTED_AT_HUB", "exception": False},
+        {"timestamp": "2026-06-24T02:00:00Z", "key": "PARCEL_SORTED_AT_HUB", "exception": False},
+    ]}]}}]
+    assert len(build_history(track_trace)) == 1
+
+
+def test_build_history_empty_for_no_data():
+    assert build_history(None) == []
+    assert build_history([]) == []
+
+
+def test_build_history_handles_naive_and_unparseable_timestamps():
+    track_trace = [{"view": {"phases": [{"phase": "UNDERWAY", "events": [
+        {"timestamp": "garbage", "key": "PARCEL_SORTED_AT_HUB", "exception": False},
+        {"timestamp": "2026-06-24T02:00:00", "key": "PARCEL_SORTED_AT_HUB", "exception": False},  # naive
+    ]}]}}]
+    history = build_history(track_trace)
+    # The naive (parseable) entry sorts ahead of the unparseable one.
+    assert history[0]["timestamp"] == "2026-06-24T02:00:00"
+    assert history[-1]["timestamp"] == "garbage"
+
+
+# ---------------------------------------------------------------------------
+# normalize_parcel — history field
+# ---------------------------------------------------------------------------
+
+
+def test_normalize_parcel_history_defaults_to_none():
+    assert normalize_parcel(_parcel("IN_DELIVERY"))["history"] is None
+
+
+def test_normalize_parcel_history_passes_through_top_level():
+    events = [{"timestamp": "2026-06-24T17:23:13Z", "status": "delivered", "raw_status": "DELIVERED"}]
+    normalized = normalize_parcel(_parcel("DELIVERED"), history=events)
+    assert normalized["history"] == events
+    # Top-level so it survives the aggregator's strip_raw(); not under raw.
+    assert "history" not in normalized["raw"]
+
+
+# ---------------------------------------------------------------------------
+# DhlCoordinator._enrich_history
+# ---------------------------------------------------------------------------
+
+
+def _hist_parcel(barcode: str = "JX1", status: str = "OUT_FOR_DELIVERY") -> dict:
+    return {
+        "barcode": barcode,
+        "parcelId": "uuid-1",
+        "status": status,
+        "category": "IN_DELIVERY",
+        "receiver": {"address": {"postalCode": "1234 AB"}},
+    }
+
+
+async def test_enrich_history_fetches_and_caches_when_option_on(hass):
+    client = MagicMock()
+    client.async_get_track_trace = AsyncMock(return_value=_TRACK_TRACE)
+    coordinator = DhlCoordinator(hass, client, _mock_entry(include_history=True))
+
+    await coordinator._enrich_history([_hist_parcel()])
+
+    # Postcode is whitespace-stripped; uuid + barcode passed through.
+    client.async_get_track_trace.assert_awaited_once_with("JX1", "1234AB", "uuid-1")
+    cached = coordinator._history_cache["JX1"]
+    assert cached["history"][-1]["status"] == ParcelStatus.DELIVERED
+    assert cached["_raw_status"] == "OUT_FOR_DELIVERY"
+
+
+async def test_enrich_history_noop_when_option_off(hass):
+    client = MagicMock()
+    client.async_get_track_trace = AsyncMock(return_value=_TRACK_TRACE)
+    coordinator = DhlCoordinator(hass, client, _mock_entry(include_history=False))
+
+    await coordinator._enrich_history([_hist_parcel()])
+
+    client.async_get_track_trace.assert_not_called()
+    assert coordinator._history_cache == {}
+
+
+async def test_enrich_history_skips_refetch_when_status_unchanged(hass):
+    client = MagicMock()
+    client.async_get_track_trace = AsyncMock(return_value=_TRACK_TRACE)
+    coordinator = DhlCoordinator(hass, client, _mock_entry(include_history=True))
+    coordinator._history_cache = {"JX1": {"history": [], "_raw_status": "OUT_FOR_DELIVERY"}}
+
+    await coordinator._enrich_history([_hist_parcel(status="OUT_FOR_DELIVERY")])
+
+    client.async_get_track_trace.assert_not_called()
+
+
+async def test_enrich_history_refetches_on_status_change(hass):
+    client = MagicMock()
+    client.async_get_track_trace = AsyncMock(return_value=_TRACK_TRACE)
+    coordinator = DhlCoordinator(hass, client, _mock_entry(include_history=True))
+    coordinator._history_cache = {"JX1": {"history": [], "_raw_status": "PARCEL_SORTED_AT_HUB"}}
+
+    await coordinator._enrich_history([_hist_parcel(status="OUT_FOR_DELIVERY")])
+
+    client.async_get_track_trace.assert_awaited_once()
+    assert coordinator._history_cache["JX1"]["_raw_status"] == "OUT_FOR_DELIVERY"
+
+
+async def test_enrich_history_skips_parcel_without_postcode_or_uuid(hass):
+    client = MagicMock()
+    client.async_get_track_trace = AsyncMock(return_value=_TRACK_TRACE)
+    coordinator = DhlCoordinator(hass, client, _mock_entry(include_history=True))
+
+    no_postcode = {"barcode": "JX2", "parcelId": "u", "status": "X", "receiver": {"address": {}}}
+    no_uuid = {"barcode": "JX3", "status": "X", "receiver": {"address": {"postalCode": "1000AA"}}}
+    no_barcode = {"parcelId": "u", "status": "X", "receiver": {"address": {"postalCode": "1000AA"}}}
+    await coordinator._enrich_history([no_postcode, no_uuid, no_barcode])
+
+    client.async_get_track_trace.assert_not_called()
+
+
+async def test_enrich_history_best_effort_leaves_cache_on_none(hass):
+    client = MagicMock()
+    client.async_get_track_trace = AsyncMock(return_value=None)
+    coordinator = DhlCoordinator(hass, client, _mock_entry(include_history=True))
+
+    await coordinator._enrich_history([_hist_parcel()])
+
+    # A None (failed) response must not write a bogus cache entry.
+    assert coordinator._history_cache == {}

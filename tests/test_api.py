@@ -189,3 +189,46 @@ def test_dhl_api_error_carries_status_code_in_message():
     err = DhlApiError(503)
     assert "503" in str(err)
     assert err.status_code == 503
+
+
+# ---------------------------------------------------------------------------
+# async_get_track_trace
+# ---------------------------------------------------------------------------
+
+
+def _mock_text_response(*, status: int = 200, text: str = "") -> MagicMock:
+    """Like _mock_response but exposes ``.text()`` for the text/plain endpoint."""
+    response = MagicMock()
+    response.status = status
+    response.text = AsyncMock(return_value=text)
+    response.__aenter__ = AsyncMock(return_value=response)
+    response.__aexit__ = AsyncMock(return_value=False)
+    return response
+
+
+async def test_async_get_track_trace_parses_text_plain_body_and_params():
+    import json as _json
+
+    payload = [{"id": "u", "view": {"phases": []}}]
+    session = _mock_session(gets=[_mock_text_response(text=_json.dumps(payload))])
+    client = DhlApiClient("a@b", "pw", session)
+
+    result = await client.async_get_track_trace("JX1", "1234AB", "u")
+
+    assert result == payload
+    kwargs = session.get.call_args.kwargs
+    assert kwargs["params"]["key"] == "JX1+1234AB"
+    assert kwargs["params"]["uuid"] == "u"
+    assert kwargs["params"]["role"] == "consumer-receiver"
+
+
+async def test_async_get_track_trace_returns_none_on_non_200():
+    session = _mock_session(gets=[_mock_text_response(status=500, text="")])
+    client = DhlApiClient("a@b", "pw", session)
+    assert await client.async_get_track_trace("JX1", "1234AB", "u") is None
+
+
+async def test_async_get_track_trace_returns_none_on_malformed_body():
+    session = _mock_session(gets=[_mock_text_response(text="not json at all")])
+    client = DhlApiClient("a@b", "pw", session)
+    assert await client.async_get_track_trace("JX1", "1234AB", "u") is None

@@ -19,9 +19,11 @@ from .api import DhlApiClient, DhlAuthError
 from .const import (
     CONF_DELIVERED_FILTER_AMOUNT,
     CONF_DELIVERED_FILTER_TYPE,
+    CONF_INCLUDE_HISTORY,
     CONF_REFRESH_INTERVAL,
     DEFAULT_DELIVERED_FILTER_AMOUNT,
     DEFAULT_DELIVERED_FILTER_TYPE,
+    DEFAULT_INCLUDE_HISTORY,
     DEFAULT_REFRESH_INTERVAL,
     DOMAIN,
     REFRESH_INTERVAL_OPTIONS,
@@ -180,6 +182,7 @@ class DhlOptionsFlowHandler(OptionsFlow):
         """Show the options form."""
         if user_input is not None:
             delivered = user_input.get("delivered", {})
+            history = user_input.get("history", {})
             polling = user_input.get("polling", {})
             self.hass.config_entries.async_schedule_reload(self.config_entry.entry_id)
             return self.async_create_entry(
@@ -187,6 +190,7 @@ class DhlOptionsFlowHandler(OptionsFlow):
                 data={
                     CONF_DELIVERED_FILTER_TYPE: delivered[CONF_DELIVERED_FILTER_TYPE],
                     CONF_DELIVERED_FILTER_AMOUNT: int(delivered[CONF_DELIVERED_FILTER_AMOUNT]),
+                    CONF_INCLUDE_HISTORY: bool(history[CONF_INCLUDE_HISTORY]),
                     CONF_REFRESH_INTERVAL: int(polling[CONF_REFRESH_INTERVAL]),
                 },
             )
@@ -232,15 +236,33 @@ class DhlOptionsFlowHandler(OptionsFlow):
                         ),
                         {"collapsed": False},
                     ),
+                    vol.Required("history"): section(
+                        vol.Schema(
+                            {
+                                vol.Required(
+                                    CONF_INCLUDE_HISTORY,
+                                    default=current.get(
+                                        CONF_INCLUDE_HISTORY,
+                                        DEFAULT_INCLUDE_HISTORY,
+                                    ),
+                                ): selector.BooleanSelector(),
+                            }
+                        ),
+                        {"collapsed": True},
+                    ),
                     vol.Required("polling"): section(
                         vol.Schema(
                             {
                                 vol.Required(
                                     CONF_REFRESH_INTERVAL,
-                                    default=current.get(
+                                    # str(): the selector's option values are
+                                    # strings, so the default must be a string
+                                    # too — a stored int won't match and trips
+                                    # "expected str" validation on submit.
+                                    default=str(current.get(
                                         CONF_REFRESH_INTERVAL,
                                         DEFAULT_REFRESH_INTERVAL,
-                                    ),
+                                    )),
                                 ): selector.SelectSelector(
                                     selector.SelectSelectorConfig(
                                         options=[

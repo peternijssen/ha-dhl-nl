@@ -24,6 +24,7 @@ A custom Home Assistant integration that tracks your incoming and outgoing DHL e
 
 - Incoming and outgoing parcel count sensors
 - Per-parcel sensor per active incoming shipment
+- Optional per-parcel status history timeline (opt-in; off by default)
 - Next delivery datetime sensor (device class `timestamp`)
 - ServicePoint sensors — en route and awaiting pickup
 - Automatic lifecycle management — sensors are created and removed as parcels move through delivery
@@ -64,7 +65,7 @@ A custom Home Assistant integration that tracks your incoming and outgoing DHL e
 
 ## Options
 
-Click **Configure** on the integration card. The form is split into two
+Click **Configure** on the integration card. The form is split into three
 sections:
 
 ### Delivered parcels
@@ -73,6 +74,12 @@ sections:
 |---|---|
 | Filter by | `Days` keeps delivered parcels visible for the last N days. `Number of parcels` keeps only the N most recent regardless of age. |
 | Amount | The N used by the filter above. |
+
+### Parcel history
+
+| Option | Description |
+|---|---|
+| Include status history | Adds a `history` attribute to each parcel — the ordered list of status updates (timestamp, canonical status, original DHL event code), capped to the most recent 20. **Off by default.** It needs an extra track-trace lookup per parcel (only refetched when a parcel's status changes), so only enable it if you want the full timeline. The attribute is kept out of the recorder database. |
 
 ### Polling
 
@@ -124,6 +131,7 @@ Every parcel exposed on a sensor attribute uses a carrier-agnostic shape:
 | `url` | string \| null | Deep link to the parcel's tracking page |
 | `weight` | float \| null | Parcel weight in kilograms. Always `null` for DHL — the API does not expose it. |
 | `dimensions` | dict \| null | Parcel dimensions in centimeters. Always `null` for DHL — same reason as `weight`. |
+| `history` | list \| null | Ordered status timeline (oldest → newest), each entry `{timestamp, status, raw_status}` where `raw_status` is the DHL event code. Capped to the most recent 20. `null` unless the **Parcel history** option is enabled — see [Options](#options). |
 | `raw` | dict | The original DHL API payload |
 
 ## Parcel status reference
@@ -141,7 +149,7 @@ the raw value stays available on `raw_status` for power users.
 | `delivered` | Handed over to the recipient, mailbox, neighbour, or picked up at a ServicePoint | category `DELIVERED` or raw status `COLLECTED_AT_PARCELSHOP` |
 | `returning` | Failed delivery, on the way back to the sender | (not yet observed; will be added once the raw indicator is confirmed) |
 | `problem` | Carrier reports an exception, intervention, or other issue with the parcel | category `INTERVENTION`, `EXCEPTION`, or `PROBLEM` |
-| `unknown` | Raw status/category we have not mapped yet | anything else — logged once at info level so it can be added to the map |
+| `unknown` | Raw status/category we have not mapped yet | anything else — logged once at warning level with a ready-to-paste issue link so it can be added to the map |
 
 ## Events
 

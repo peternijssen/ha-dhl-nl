@@ -14,11 +14,14 @@ from .const import (
     ACTIVE_CATEGORIES,
     CONF_DELIVERED_FILTER_AMOUNT,
     CONF_DELIVERED_FILTER_TYPE,
+    CONF_INCLUDE_HISTORY,
     CONF_REFRESH_INTERVAL,
     DEFAULT_DELIVERED_FILTER_AMOUNT,
     DEFAULT_DELIVERED_FILTER_TYPE,
+    DEFAULT_INCLUDE_HISTORY,
     DEFAULT_REFRESH_INTERVAL,
     DOMAIN,
+    HISTORY_MAX_EVENTS,
     STATUS_AT_SERVICE_POINT,
     STATUS_COLLECTED_AT_SERVICE_POINT,
     ParcelStatus,
@@ -54,9 +57,15 @@ _CATEGORY_MAP: dict[str, ParcelStatus] = {
     "DELIVERED": ParcelStatus.DELIVERED,
 }
 
-# Already-logged raw statuses so we surface each unmapped value only once
-# per HA session.
+# New-issue link surfaced in the unknown-status warnings so users can paste a
+# ready-made line into a bug report.
+_NEW_ISSUE_URL = "https://github.com/peternijssen/ha-dhl-nl/issues/new"
+
+# Already-logged values so we surface each unmapped one only once per HA
+# session. Parcel-level keys on (status, category); history keys on
+# (event key, phase).
 _unmapped_statuses_logged: set[tuple[str, str]] = set()
+_unmapped_event_keys_logged: set[tuple[str, str]] = set()
 
 
 def _refresh_interval(entry: ConfigEntry) -> timedelta:
@@ -84,14 +93,116 @@ def map_parcel_status(parcel: dict) -> ParcelStatus:
     key = (raw_status, raw_category)
     if key not in _unmapped_statuses_logged:
         _unmapped_statuses_logged.add(key)
-        _LOGGER.info(
-            "DHL parcel status not yet mapped: status=%r category=%r — "
-            "will report as ParcelStatus.UNKNOWN. Please open an issue "
-            "so we can add it to the map.",
+        _LOGGER.warning(
+            "Unrecognised DHL status — help us map it. Open an issue and "
+            "paste this line: %s\n  [parcel] status=%s category=%s "
+            "→ reported as 'unknown'",
+            _NEW_ISSUE_URL,
             raw_status,
             raw_category,
         )
     return ParcelStatus.UNKNOWN
+
+
+def map_event_status(
+    event_key: str | None, phase: str | None
+) -> ParcelStatus | None:
+    """Map a track-trace event to a canonical status, reusing the parcel maps.
+
+    DHL's per-event ``key`` shares the granular ``status`` vocabulary and the
+    ``phase`` shares the ``category`` vocabulary, so the same two maps drive
+    history: the granular ``_STATUS_MAP`` first (more specific), then the
+    coarser ``_CATEGORY_MAP`` on the phase. Unmapped → ``None`` (history keeps
+    ``status: null``) plus a one-shot warning with copy-paste issue text.
+    """
+    if event_key and event_key in _STATUS_MAP:
+        return _STATUS_MAP[event_key]
+    if phase and phase in _CATEGORY_MAP:
+        return _CATEGORY_MAP[phase]
+
+    key = (event_key or "", phase or "")
+    if key not in _unmapped_event_keys_logged:
+        _unmapped_event_keys_logged.add(key)
+        _LOGGER.warning(
+            "Unrecognised DHL status — help us map it. Open an issue and "
+            "paste this line: %s\n  [history] key=%s phase=%s "
+            "→ reported as 'unknown'",
+            _NEW_ISSUE_URL,
+            event_key,
+            phase,
+        )
+    return None
+
+
+def _parse_iso(value: str | None) -> datetime | None:
+    """Parse an ISO 8601 string to an aware datetime, or ``None`` on failure.
+
+    Track-trace timestamps are UTC (``Z`` suffix); a naive value is treated
+    as UTC so a list always sorts without crashing on a mixed set.
+    """
+    if not value:
+        return None
+    try:
+        dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
+def _extract_events(track_trace: list | dict | None) -> list[tuple[dict, str | None]]:
+    """Flatten a track-trace response into ``(event, phase)`` pairs.
+
+    The response is a JSON array (one object per matched parcel — in practice
+    a single object). Events live under ``[0].view.phases[].events[]``; each
+    is tagged with its parent phase so the per-event mapping can fall back to
+    the phase.
+    """
+    if not track_trace:
+        return []
+    first = track_trace[0] if isinstance(track_trace, list) else track_trace
+    view = (first or {}).get("view") or {}
+    pairs: list[tuple[dict, str | None]] = []
+    for phase_block in view.get("phases") or []:
+        phase = phase_block.get("phase")
+        for event in phase_block.get("events") or []:
+            pairs.append((event, phase))
+    return pairs
+
+
+def build_history(
+    track_trace: list | dict | None, *, max_events: int = HISTORY_MAX_EVENTS
+) -> list[dict]:
+    """Build the canonical ``history`` list from a track-trace response.
+
+    Each entry is ``{timestamp, status, raw_status}`` — identical across all
+    suite carriers. DHL has no human event text, so ``raw_status`` is the
+    event ``key`` (a code), mirroring how the parcel-level ``raw_status`` is
+    the carrier's own status string. Sorted oldest → newest by timestamp
+    (DHL returns phases newest-first) and capped to the most recent
+    ``max_events``.
+    """
+    parseable: list[tuple[datetime, dict]] = []
+    unparseable: list[dict] = []
+    for event, phase in _extract_events(track_trace):
+        timestamp = event.get("timestamp")
+        if not timestamp:
+            continue
+        event_key = event.get("key")
+        entry = {
+            "timestamp": timestamp,
+            "status": map_event_status(event_key, phase),
+            "raw_status": event_key,
+        }
+        dt = _parse_iso(timestamp)
+        if dt is None:
+            unparseable.append(entry)
+        else:
+            parseable.append((dt, entry))
+    parseable.sort(key=lambda item: item[0])
+    ordered = [entry for _, entry in parseable] + unparseable
+    return ordered[-max_events:]
 
 
 def _delivery_window(parcel: dict) -> tuple[str | None, str | None]:
@@ -120,13 +231,17 @@ def _tracking_url(parcel: dict) -> str | None:
     return f"https://my.dhlecommerce.nl/portal/tracktrace/{barcode}/{postal}"
 
 
-def normalize_parcel(parcel: dict) -> dict:
+def normalize_parcel(parcel: dict, *, history: list[dict] | None = None) -> dict:
     """Return a carrier-agnostic parcel dict with the original DHL payload under ``raw``.
 
     ``weight`` and ``dimensions`` are part of the canonical shape every carrier
     integration publishes but DHL does not expose them in any endpoint we know
     of, so they are always ``None`` here. Aggregator and cross-carrier cards
     can still rely on the keys being present.
+
+    ``history`` is the optional per-parcel status timeline (opt-in option,
+    default off → ``None``). It comes from a separate track-trace call and
+    stays top-level so it survives the aggregator's ``strip_raw()``.
     """
     sender = parcel.get("sender") or {}
     receiver = parcel.get("receiver") or {}
@@ -151,6 +266,7 @@ def normalize_parcel(parcel: dict) -> dict:
         "url": _tracking_url(parcel),
         "weight": None,
         "dimensions": None,
+        "history": history,
         "raw": parcel,
     }
 
@@ -238,6 +354,27 @@ class DhlCoordinator(DataUpdateCoordinator[list[dict]]):
         self._known_delivery_times: (
             dict[str, tuple[str | None, str | None]] | None
         ) = None
+        # barcode -> {"history": [...], "_raw_status": str}. The track-trace
+        # call is an extra HTTP request per parcel, so we only make it when
+        # the history option is on, and only refetch when a parcel's raw
+        # status changes (history only grows on a status change). The cache
+        # lives for the integration's lifetime (resets on HA restart).
+        self._history_cache: dict[str, dict] = {}
+
+    @property
+    def _include_history(self) -> bool:
+        """Whether the opt-in per-parcel history option is enabled."""
+        return bool(
+            self.config_entry.options.get(
+                CONF_INCLUDE_HISTORY, DEFAULT_INCLUDE_HISTORY
+            )
+        )
+
+    def _normalize(self, parcel: dict) -> dict:
+        """Normalize a raw parcel, attaching any cached history timeline."""
+        barcode = parcel.get("barcode") or ""
+        history = (self._history_cache.get(barcode) or {}).get("history")
+        return normalize_parcel(parcel, history=history)
 
     async def _async_update_data(self) -> list[dict]:
         try:
@@ -254,13 +391,17 @@ class DhlCoordinator(DataUpdateCoordinator[list[dict]]):
             "DHL parcels fetched: %d total, %d active, %d delivered",
             len(raw), len(active), len(delivered),
         )
+        # Fetch the track-trace timeline for active + delivered parcels when
+        # the option is on, before normalizing so the history is attached.
+        await self._enrich_history(active + delivered)
+
         self.delivered = sort_parcels_by_ts(
-            [normalize_parcel(p) for p in delivered],
+            [self._normalize(p) for p in delivered],
             "delivered_at",
             descending=True,
         )
         normalized_active = sort_parcels_by_ts(
-            [normalize_parcel(p) for p in active], "planned_from"
+            [self._normalize(p) for p in active], "planned_from"
         )
 
         self._fire_change_events(normalized_active)
@@ -338,6 +479,45 @@ class DhlCoordinator(DataUpdateCoordinator[list[dict]]):
                         "new_planned_to": new_to,
                     },
                 )
+
+    async def _enrich_history(self, parcels: list[dict]) -> None:
+        """Populate ``self._history_cache`` from the track-trace endpoint.
+
+        Opt-in only. For each parcel we call track-trace on first sight and
+        again only when its raw ``status`` changes (history grows on status
+        changes), mirroring DPD's detail-cache cost control. Best-effort: a
+        ``None`` response leaves any prior history in place and never breaks
+        the poll. The query needs the parcel's ``parcelId`` (uuid) and the
+        receiver's postcode, both from the list endpoint.
+        """
+        if not self._include_history:
+            return
+        for parcel in parcels:
+            barcode = parcel.get("barcode")
+            if not barcode:
+                continue
+            raw_status = parcel.get("status") or ""
+            cached = self._history_cache.get(barcode)
+            if cached is not None and cached.get("_raw_status") == raw_status:
+                continue
+            postal = (
+                ((parcel.get("receiver") or {}).get("address") or {}).get(
+                    "postalCode"
+                )
+                or ""
+            ).replace(" ", "")
+            parcel_id = parcel.get("parcelId")
+            if not postal or not parcel_id:
+                continue
+            track_trace = await self._client.async_get_track_trace(
+                barcode, postal, parcel_id
+            )
+            if track_trace is None:
+                continue
+            self._history_cache[barcode] = {
+                "history": build_history(track_trace),
+                "_raw_status": raw_status,
+            }
 
     def _apply_delivered_filter(self, parcels: list[dict]) -> list[dict]:
         """Apply the configured filter to the delivered parcels list."""
