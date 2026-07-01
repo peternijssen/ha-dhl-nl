@@ -59,7 +59,7 @@
               "include_history": "Include status history"
             },
             "data_description": {
-              "include_history": "Add a per-parcel history attribute listing each status update (timestamp, status, original code). Off by default — it needs an extra lookup per parcel."
+              "include_history": "Add a per-parcel history attribute listing each status update (timestamp, status, original code). Off by default."
             }
           },
           "polling": {

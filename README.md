@@ -79,7 +79,7 @@ sections:
 
 | Option | Description |
 |---|---|
-| Include status history | Adds a `history` attribute to each parcel — the ordered list of status updates (timestamp, canonical status, original DHL event code), capped to the most recent 20. **Off by default.** It needs an extra track-trace lookup per parcel (only refetched when a parcel's status changes), so only enable it if you want the full timeline. The attribute is kept out of the recorder database. |
+| Include status history | Adds a `history` attribute to each parcel — the ordered list of status updates (timestamp, canonical status, original DHL event code), capped to the most recent 20. **Off by default.** The attribute is kept out of the recorder database. |
 
 ### Polling
 
