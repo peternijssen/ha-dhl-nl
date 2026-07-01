@@ -261,3 +261,30 @@ async def test_reauth_flow_surfaces_invalid_auth(hass):
     assert result["type"] is FlowResultType.FORM
     assert result["errors"] == {"base": "invalid_auth"}
     assert entry.data[CONF_PASSWORD] == _USER_INPUT[CONF_PASSWORD]
+
+
+@pytest.mark.asyncio
+async def test_reauth_flow_aborts_on_different_account(hass):
+    """Reauthenticating with another account's credentials aborts the flow."""
+    from pytest_homeassistant_custom_component.common import MockConfigEntry
+
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id=_USER_INPUT[CONF_EMAIL],
+        data=_USER_INPUT,
+    )
+    entry.add_to_hass(hass)
+
+    with patch(
+        "custom_components.dhl_nl.config_flow.DhlApiClient.async_login",
+        new=AsyncMock(return_value={"userId": "other"}),
+    ):
+        result = await entry.start_reauth_flow(hass)
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            user_input={CONF_EMAIL: "other@example.com", CONF_PASSWORD: "pw"},
+        )
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "unique_id_mismatch"
+    assert entry.data[CONF_EMAIL] == _USER_INPUT[CONF_EMAIL]

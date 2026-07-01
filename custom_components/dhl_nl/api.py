@@ -73,7 +73,10 @@ class DhlApiClient:
         the user-info dict from the response body is returned and cached.
 
         Raises:
-            DhlAuthError: If the server returns any status other than 200.
+            DhlAuthError: If the server rejects the credentials (401/403).
+            DhlApiError: On any other non-200 status (e.g. a 5xx outage) —
+                distinct from an auth failure so callers never push the user
+                into reauth over a transient DHL hiccup.
             aiohttp.ClientError: On network-level failures.
         """
         payload = {"email": self._email, "password": self._password}
@@ -82,8 +85,10 @@ class DhlApiClient:
         async with self._session.post(
             LOGIN_URL, json=payload, headers=headers
         ) as response:
-            if response.status != 200:
+            if response.status in (401, 403):
                 raise DhlAuthError(response.status)
+            if response.status != 200:
+                raise DhlApiError(response.status)
 
             data: dict[str, Any] = await response.json()
 

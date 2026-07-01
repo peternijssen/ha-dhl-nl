@@ -52,12 +52,21 @@ async def test_async_login_returns_userinfo_and_caches_it():
     assert client.user_info == {"userId": "u1", "email": "a@b"}
 
 
-async def test_async_login_raises_dhl_auth_error_on_non_200():
+async def test_async_login_raises_dhl_auth_error_on_401():
     session = _mock_session(posts=[_mock_response(status=401)])
     client = DhlApiClient("a@b", "pw", session)
     with pytest.raises(DhlAuthError) as err:
         await client.async_login()
     assert err.value.status_code == 401
+
+
+async def test_async_login_raises_dhl_api_error_on_server_error():
+    """A 5xx on login is a transient outage, not an auth failure."""
+    session = _mock_session(posts=[_mock_response(status=503)])
+    client = DhlApiClient("a@b", "pw", session)
+    with pytest.raises(DhlApiError) as err:
+        await client.async_login()
+    assert err.value.status_code == 503
 
 
 async def test_user_info_is_none_before_login():

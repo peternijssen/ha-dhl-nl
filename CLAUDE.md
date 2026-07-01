@@ -49,7 +49,21 @@ re-propose these as improvements:
   self-remove pattern raced with coordinator-listener cleanup and left
   ghost entities behind — do not revert.
 - Reauth flow uses `async_update_reload_and_abort` (one helper call
-  instead of update + reload + abort)
+  instead of update + reload + abort). The confirm step also guards with
+  `async_set_unique_id` + `_abort_if_unique_id_mismatch` so entering a
+  *different* DHL account's credentials aborts instead of silently
+  rebinding the entry to another account.
+- **Auth-error split in `api.py`**: `async_login` raises `DhlAuthError`
+  only on 401/403; any other non-200 (a 5xx outage) raises `DhlApiError`.
+  Setup maps `DhlAuthError → ConfigEntryAuthFailed` (starts reauth) and
+  `DhlApiError`/`ClientError → ConfigEntryNotReady` (retry with backoff).
+  Do not collapse these again — a DHL outage must never push users into
+  reauth.
+- The per-entry `ClientSession` is closed on every failed-setup path
+  (login failure and a failing platform forward) — without this each
+  setup retry leaks a session.
+- Diagnostics redact person/shop names: `name` (raw payloads) and the
+  normalized top-level `receiver` are in `TO_REDACT`.
 - `aiohttp.ClientError` is intentionally not caught in the coordinator —
   `DataUpdateCoordinator` wraps it automatically
 - Diagnostics handler in `diagnostics.py` with credential and PII

@@ -34,7 +34,8 @@
     },
     "abort": {
       "already_configured": "This DHL account is already configured.",
-      "reauth_successful": "Re-authentication successful."
+      "reauth_successful": "Re-authentication successful.",
+      "unique_id_mismatch": "Re-authenticate with the same DHL account this entry was set up with."
     }
   },
   "options": {

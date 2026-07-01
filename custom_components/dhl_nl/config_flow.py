@@ -15,7 +15,7 @@ from homeassistant.data_entry_flow import section
 from homeassistant.helpers import selector
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from .api import DhlApiClient, DhlAuthError
+from .api import DhlApiClient, DhlApiError, DhlAuthError
 from .const import (
     CONF_DELIVERED_FILTER_AMOUNT,
     CONF_DELIVERED_FILTER_TYPE,
@@ -94,7 +94,7 @@ class DhlConfigFlow(ConfigFlow, domain=DOMAIN):
                 await self._validate_credentials(email, password)
             except DhlAuthError:
                 errors["base"] = "invalid_auth"
-            except aiohttp.ClientError:
+            except (DhlApiError, aiohttp.ClientError):
                 errors["base"] = "cannot_connect"
             else:
                 await self.async_set_unique_id(email)
@@ -148,9 +148,14 @@ class DhlConfigFlow(ConfigFlow, domain=DOMAIN):
                 await self._validate_credentials(email, password)
             except DhlAuthError:
                 errors["base"] = "invalid_auth"
-            except aiohttp.ClientError:
+            except (DhlApiError, aiohttp.ClientError):
                 errors["base"] = "cannot_connect"
             else:
+                # Guard against re-authenticating with a *different* DHL
+                # account — the entry (and all its entities) belong to the
+                # original account's unique_id.
+                await self.async_set_unique_id(email)
+                self._abort_if_unique_id_mismatch()
                 return self.async_update_reload_and_abort(
                     self._get_reauth_entry(),
                     data={CONF_EMAIL: email, CONF_PASSWORD: password},

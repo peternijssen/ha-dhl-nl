@@ -10,10 +10,10 @@ import aiohttp
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_EMAIL, CONF_PASSWORD
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import ConfigEntryNotReady
+from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from .api import DhlApiClient, DhlAuthError
+from .api import DhlApiClient, DhlApiError, DhlAuthError
 from .const import PLATFORMS
 from .coordinator import DhlCoordinator, DhlSentShipmentsCoordinator
 
@@ -52,9 +52,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: DhlConfigEntry) -> bool:
     try:
         user_info = await client.async_login()
     except DhlAuthError as exc:
-        _LOGGER.error("DHL authentication failed during setup: %s", exc)
+        # Credentials rejected (401/403) — let HA start the reauth flow
+        # instead of retrying a password that will never work again.
+        await session.close()
+        raise ConfigEntryAuthFailed("DHL authentication failed") from exc
+    except DhlApiError as exc:
+        # Non-auth HTTP failure (typically a 5xx outage) — retry with backoff.
+        await session.close()
         raise ConfigEntryNotReady("DHL login failed") from exc
     except aiohttp.ClientError as exc:
+        await session.close()
         raise ConfigEntryNotReady("DHL login failed") from exc
 
     coordinator = DhlCoordinator(hass, client, entry)
@@ -68,7 +75,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: DhlConfigEntry) -> bool:
         session=session,
     )
 
-    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    try:
+        await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    except Exception:
+        # A failed platform setup (e.g. ConfigEntryNotReady from the first
+        # refresh) would otherwise leak the dedicated session on every retry.
+        await session.close()
+        raise
 
     return True
 

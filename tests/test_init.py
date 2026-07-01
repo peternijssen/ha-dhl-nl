@@ -8,7 +8,7 @@ from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import CONF_EMAIL, CONF_PASSWORD
 
 from custom_components.dhl_nl import DhlData
-from custom_components.dhl_nl.api import DhlAuthError
+from custom_components.dhl_nl.api import DhlApiError, DhlAuthError
 from custom_components.dhl_nl.const import (
     CONF_DELIVERED_FILTER_AMOUNT,
     CONF_DELIVERED_FILTER_TYPE,
@@ -65,12 +65,28 @@ async def test_setup_entry_succeeds_and_stores_runtime_data(hass):
 
 
 @pytest.mark.asyncio
-async def test_setup_entry_retries_on_invalid_auth(hass):
-    """A DhlAuthError during initial login surfaces as a setup retry."""
+async def test_setup_entry_starts_reauth_on_invalid_auth(hass):
+    """A DhlAuthError during initial login starts the reauth flow."""
     entry = _add_entry(hass)
     with patch(
         "custom_components.dhl_nl.DhlApiClient.async_login",
         new=AsyncMock(side_effect=DhlAuthError(401)),
+    ):
+        assert not await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    assert entry.state is ConfigEntryState.SETUP_ERROR
+    flows = hass.config_entries.flow.async_progress_by_handler(DOMAIN)
+    assert any(flow["context"].get("source") == "reauth" for flow in flows)
+
+
+@pytest.mark.asyncio
+async def test_setup_entry_retries_on_server_error(hass):
+    """A non-auth HTTP failure (5xx) during initial login is a setup retry."""
+    entry = _add_entry(hass)
+    with patch(
+        "custom_components.dhl_nl.DhlApiClient.async_login",
+        new=AsyncMock(side_effect=DhlApiError(503)),
     ):
         assert not await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
