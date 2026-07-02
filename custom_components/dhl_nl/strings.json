@@ -60,7 +60,7 @@
               "include_history": "Include status history"
             },
             "data_description": {
-              "include_history": "Add a per-parcel history attribute listing each status update (timestamp, status, original code). Off by default."
+              "include_history": "Add a per-parcel history attribute listing each status update (timestamp, status, original text). Off by default."
             }
           },
           "polling": {
@@ -69,7 +69,7 @@
               "refresh_interval": "Refresh every"
             },
             "data_description": {
-              "refresh_interval": "How often the integration checks DHL for parcel updates. A slower interval is gentler on DHL's consumer API; the default of 30 minutes is plenty for most parcels."
+              "refresh_interval": "How often the integration checks DHL for parcel updates. A slower interval is gentler on DHL's API; the default of 30 minutes is plenty for most parcels."
             }
           }
         }

@@ -41,7 +41,7 @@
   "options": {
     "step": {
       "init": {
-        "title": "DHL opties",
+        "title": "DHL-opties",
         "sections": {
           "delivered": {
             "name": "Bezorgde pakketten",
@@ -60,16 +60,16 @@
               "include_history": "Statusgeschiedenis toevoegen"
             },
             "data_description": {
-              "include_history": "Voegt een geschiedenis-attribuut per pakket toe met elke statusupdate (tijdstip, status, originele code). Standaard uit."
+              "include_history": "Voegt een geschiedenis-attribuut per pakket toe met elke statusupdate (tijdstip, status, originele tekst). Standaard uit."
             }
           },
           "polling": {
             "name": "Verversen",
             "data": {
-              "refresh_interval": "Elke"
+              "refresh_interval": "Ververs elke"
             },
             "data_description": {
-              "refresh_interval": "Hoe vaak de integratie nieuwe parcel-informatie ophaalt. Een langer interval is vriendelijker voor DHL; de standaard van 30 minuten is voor de meeste pakketten ruim voldoende."
+              "refresh_interval": "Hoe vaak de integratie DHL controleert op pakketupdates. Een langzamer interval is vriendelijker voor DHL; de standaard van 30 minuten is ruim voldoende voor de meeste pakketten."
             }
           }
         }
@@ -113,7 +113,7 @@
     },
     "sensor": {
       "incoming_parcels": {
-        "name": "Binnenkomende pakketten",
+        "name": "Inkomende pakketten",
         "unit_of_measurement": "pakketten"
       },
       "outgoing_parcels": {
@@ -121,7 +121,7 @@
         "unit_of_measurement": "pakketten"
       },
       "next_delivery": {
-        "name": "Eerstvolgende bezorging"
+        "name": "Volgende bezorging"
       },
       "en_route_to_service_point": {
         "name": "Onderweg naar ServicePoint",
