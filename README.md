@@ -219,6 +219,7 @@ Tracking parcels from other Dutch carriers:
 |---|---|
 | [ha-postnl](https://github.com/peternijssen/ha-postnl) | PostNL parcel tracker — maintained version. The [arjenbos/ha-postnl](https://github.com/arjenbos/ha-postnl) original is the legacy version. |
 | [ha-dpd](https://github.com/peternijssen/ha-dpd) | DPD parcel tracker. |
+| [ha-gls](https://github.com/peternijssen/ha-gls) | GLS Netherlands parcel tracker — no account, you enter tracking numbers yourself. |
 | [ha-parcel-aggregator](https://github.com/peternijssen/ha-parcel-aggregator) | Rolls up counts and next-delivery timestamps from all installed carrier integrations into a single set of sensors. |
 
 ## Disclaimer
