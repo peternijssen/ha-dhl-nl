@@ -1,4 +1,4 @@
-# Expose return parcels as outgoing sensors
+# Fold return parcels into the existing outgoing sensors
 
 ## Motivation
 
@@ -17,89 +17,98 @@ payload used for incoming parcels tags return shipments with `isReturn: true`
 (and, once complete, `isReturnedToShipper: true` / `destination.locationType:
 "RETURN"`). Both `filter_active_parcels()` and `filter_delivered_parcels()`
 already exclude these — they were just being dropped on the floor instead of
-routed anywhere. This PR routes them to two new sensors instead.
+routed anywhere.
+
+**Naming:** an earlier version of this PR exposed returns under DHL-specific
+`returning_parcels` / `delivered_outgoing_parcels` sensors. That was wrong —
+`isReturn` is an implementation detail of *how* a parcel became outgoing, not
+a different concept from "outgoing" itself. This version instead merges
+return data into the **existing** `outgoing_parcels` sensor and a new
+`outgoing_delivered_parcels` sensor, matching PostNL's naming exactly so
+cross-carrier tooling (e.g. the hki-parcels-card Lovelace card) needs no
+DHL-specific special-casing.
 
 ## Changes
 
 ### `coordinator.py`
 
-Added `filter_active_returns()` and `filter_delivered_returns()` next to the
-existing incoming filters — same shape, but require `isReturn` instead of
-excluding it:
+Added `filter_active_returns()` / `filter_delivered_returns()` (require
+`isReturn`, mirroring the incoming filters which exclude it) and
+`filter_delivered_sent_shipments()` (delivered counterpart of the existing
+`filter_active_sent_shipments()`, which only ever tracked active shipments
+before this PR):
 
 ```python
 def filter_active_returns(parcels: list[dict]) -> list[dict]:
-    return [
-        p for p in parcels
-        if p.get("isReturn")
-        and p.get("category") in ACTIVE_CATEGORIES
-    ]
-
+    return [p for p in parcels if p.get("isReturn") and p.get("category") in ACTIVE_CATEGORIES]
 
 def filter_delivered_returns(parcels: list[dict]) -> list[dict]:
-    return [
-        p for p in parcels
-        if p.get("isReturn")
-        and p.get("category") == "DELIVERED"
-    ]
+    return [p for p in parcels if p.get("isReturn") and p.get("category") == "DELIVERED"]
+
+def filter_delivered_sent_shipments(shipments: list[dict]) -> list[dict]:
+    return [s for s in shipments if s.get("type") == "outgoing" and s.get("category") == "DELIVERED"]
 ```
 
 `DhlCoordinator` gets two new attributes, `returning` and `delivered_outgoing`,
 populated in `_async_update_data` from the same raw `parcels` list already
-being fetched — no new API call. They go through the same `normalize_parcel`
-/ `sort_parcels_by_ts` / `_apply_delivered_filter` pipeline as the incoming
-lists, so the existing delivered-filter option (days / count) applies to
-returns too.
+being fetched — no new API call. `DhlSentShipmentsCoordinator` gets a new
+`delivered` attribute alongside its existing active list. All four lists go
+through the same `normalize_parcel` / `sort_parcels_by_ts` pipeline, and the
+delivered ones share the existing days/count delivered-filter option via a
+new module-level `_apply_delivered_filter(parcels, entry)` (extracted from
+what used to be a `DhlCoordinator`-only method; the instance method still
+exists as a thin wrapper so nothing that called it needs to change).
 
 Deliberately **not** touched: `_enrich_history` (still only receiver-role
-incoming parcels — track-trace isn't valid for returns) and `_fire_change_events`
-(no `dhl_nl_parcel_registered` / `_status_changed` events fire for returns).
-`DhlSentShipmentsCoordinator` and `filter_active_sent_shipments()` are
-completely unchanged.
+incoming parcels — track-trace isn't valid for returns) and
+`_fire_change_events` (no `dhl_nl_parcel_registered` / `_status_changed`
+events fire for returns or sent shipments).
 
 ### `sensor.py`
 
-Two new summary sensors, same no-per-item pattern as `DhlSentShipmentsSensor`:
-
-- `DhlReturningParcelsSensor` — `translation_key="returning_parcels"`,
-  `unique_id = f"{user_id}_returning_parcels"`, backed by `coordinator.returning`
-- `DhlDeliveredOutgoingParcelsSensor` — `translation_key="delivered_outgoing_parcels"`,
-  `unique_id = f"{user_id}_delivered_outgoing_parcels"`, backed by
-  `coordinator.delivered_outgoing`
-
-Both added to `non_parcel_unique_ids` in `async_setup_entry` so the per-parcel
-stale-entity cleanup doesn't mistake them for a dropped barcode.
+- `DhlSentShipmentsSensor` (existing, `unique_id={user_id}_outgoing_parcels`)
+  now merges `sent_coordinator.data` with `coordinator.returning` instead of
+  reading only from `sent_coordinator.data`. In practice this means it goes
+  from always-empty to actually showing your returns.
+- New `DhlOutgoingDeliveredSensor` (`unique_id={user_id}_outgoing_delivered_parcels`)
+  merges `sent_coordinator.delivered` with `coordinator.delivered_outgoing`.
+- Both are `CoordinatorEntity[DhlCoordinator]` (an arbitrary choice — both
+  coordinators share the same refresh interval) and take both coordinators
+  as constructor arguments.
+- `outgoing_delivered_parcels` added to `non_parcel_unique_ids` in
+  `async_setup_entry` (`outgoing_parcels` was already there).
 
 ### `strings.json` / `translations/en.json` / `translations/nl.json` / `icons.json`
 
+Only one new key — `outgoing_parcels` already existed:
+
 | Key | English | Dutch | Icon |
 |---|---|---|---|
-| `returning_parcels` | Returning parcels | Retouren onderweg | `mdi:package-up` |
-| `delivered_outgoing_parcels` | Delivered outgoing parcels | Bezorgde uitgaande pakketten | `mdi:package-check` |
+| `outgoing_delivered_parcels` | Delivered outgoing parcels | Bezorgde uitgaande pakketten | `mdi:package-check` |
 
 ### `ARCHITECTURE.md` / `CLAUDE.md`
 
-Documented why returns are sourced from `DhlCoordinator` instead of
-`DhlSentShipmentsCoordinator`, and added the usual "Adopted in X — do not
-refactor away" section so this doesn't get re-litigated later.
+Documented why returns are computed on `DhlCoordinator` but exposed through
+sensors that merge in `DhlSentShipmentsCoordinator`'s data, and why the
+entity naming deliberately does **not** mention "return" anywhere.
 
 ### Tests
 
-Added coordinator tests for `filter_active_returns` / `filter_delivered_returns`
-and for `DhlCoordinator.returning` / `.delivered_outgoing` population, plus
-sensor tests for both new sensor classes, mirroring the existing
-`DhlDeliveredParcelsSensor` test style.
+Coordinator tests for `filter_active_returns` / `filter_delivered_returns` /
+`filter_delivered_sent_shipments`, `DhlCoordinator.returning` /
+`.delivered_outgoing` population, and `DhlSentShipmentsCoordinator.delivered`
+population. Sensor tests for the merged `DhlSentShipmentsSensor` and new
+`DhlOutgoingDeliveredSensor`, covering both "returns only" (the common case)
+and "both sources have data" (merge correctness).
 
 ## Test plan
 
 - [ ] `python -m pytest tests/ --cov=custom_components.dhl_nl` passes, coverage stays > 95%
 - [ ] A return in `UNDERWAY` (e.g. raw status `PARCEL_READY_FOR_RETURN_TO_HUB`)
-      shows up in `sensor.dhl_..._returning_parcels`
+      shows up in `sensor.dhl_..._outgoing_parcels`
 - [ ] A completed return (category `DELIVERED`, e.g. raw status
-      `RETURN_DELIVERED_AT_SHIPPER_CALCULATED`) shows up in
-      `sensor.dhl_..._delivered_outgoing_parcels`
+      `RETURN_DELIVERED_AT_SHIPPER_CALCULATED`) shows up in the new
+      `sensor.dhl_..._outgoing_delivered_parcels`
 - [ ] Normal (non-return) incoming parcels are unaffected — still only in the
       incoming/delivered sensors
-- [ ] `DhlSentShipmentsSensor` (the account holder's own DHL-registered
-      shipments) is unaffected
 - [ ] No new events fire for returns; no history is fetched for returns

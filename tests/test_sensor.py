@@ -10,14 +10,14 @@ from custom_components.dhl_nl.const import (
 )
 from custom_components.dhl_nl.coordinator import normalize_parcel
 from custom_components.dhl_nl.sensor import (
-    DhlDeliveredOutgoingParcelsSensor,
     DhlDeliveredParcelsSensor,
     DhlEnRouteToServicePointSensor,
     DhlIncomingParcelsSensor,
     DhlNextDeliverySensor,
+    DhlOutgoingDeliveredSensor,
     DhlParcelSensor,
     DhlPickupPendingSensor,
-    DhlReturningParcelsSensor,
+    DhlSentShipmentsSensor,
 )
 
 USER_INFO = {"userId": "user123", "email": "test@example.com"}
@@ -282,7 +282,8 @@ def test_delivered_sensor_attributes_handle_missing_sender():
 
 
 # ---------------------------------------------------------------------------
-# DhlReturningParcelsSensor / DhlDeliveredOutgoingParcelsSensor
+# DhlSentShipmentsSensor / DhlOutgoingDeliveredSensor — merge sent shipments
+# with return parcels into a single "outgoing" concept.
 # ---------------------------------------------------------------------------
 
 
@@ -297,45 +298,69 @@ def _return_parcel(barcode: str = "RET123", category: str = "UNDERWAY") -> dict:
     })
 
 
-def test_returning_sensor_count_matches_coordinator_returning():
-    returning = [_return_parcel("A"), _return_parcel("B")]
-    sensor = DhlReturningParcelsSensor(_make_coordinator([], returning=returning), USER_INFO)
+def _sent_shipment(barcode: str = "SENT123") -> dict:
+    return normalize_parcel({
+        "barcode": barcode,
+        "category": "IN_DELIVERY",
+        "sender": {"name": "Test User"},
+    })
+
+
+def _make_sent_coordinator(data=None, delivered=None) -> MagicMock:
+    sent_coordinator = MagicMock()
+    sent_coordinator.data = data if data is not None else []
+    sent_coordinator.delivered = delivered if delivered is not None else []
+    return sent_coordinator
+
+
+def test_outgoing_sensor_counts_returns_only_when_sent_coordinator_empty():
+    """The common case: the sent-shipments endpoint is empty, returns are not."""
+    coordinator = _make_coordinator([], returning=[_return_parcel("A"), _return_parcel("B")])
+    sensor = DhlSentShipmentsSensor(coordinator, _make_sent_coordinator(), USER_INFO)
     assert sensor.native_value == 2
 
 
-def test_returning_sensor_zero_when_no_returns():
-    sensor = DhlReturningParcelsSensor(_make_coordinator([]), USER_INFO)
+def test_outgoing_sensor_merges_sent_shipments_and_returns():
+    coordinator = _make_coordinator([], returning=[_return_parcel("A")])
+    sent_coordinator = _make_sent_coordinator(data=[_sent_shipment("B")])
+    sensor = DhlSentShipmentsSensor(coordinator, sent_coordinator, USER_INFO)
+    assert sensor.native_value == 2
+    barcodes = {p["barcode"] for p in sensor.extra_state_attributes["parcels"]}
+    assert barcodes == {"A", "B"}
+
+
+def test_outgoing_sensor_zero_when_both_sources_empty():
+    sensor = DhlSentShipmentsSensor(_make_coordinator([]), _make_sent_coordinator(), USER_INFO)
     assert sensor.native_value == 0
 
 
-def test_returning_sensor_attributes_list_parcels():
-    returning = [_return_parcel("RET1")]
-    sensor = DhlReturningParcelsSensor(_make_coordinator([], returning=returning), USER_INFO)
-    attrs = sensor.extra_state_attributes
-    assert attrs["parcels"][0]["barcode"] == "RET1"
-
-
-def test_delivered_outgoing_sensor_count_matches_coordinator():
+def test_outgoing_delivered_sensor_counts_delivered_returns_only_when_sent_empty():
     delivered_outgoing = [
         _return_parcel("A", category="DELIVERED"),
         _return_parcel("B", category="DELIVERED"),
     ]
-    sensor = DhlDeliveredOutgoingParcelsSensor(
-        _make_coordinator([], delivered_outgoing=delivered_outgoing), USER_INFO
-    )
+    coordinator = _make_coordinator([], delivered_outgoing=delivered_outgoing)
+    sensor = DhlOutgoingDeliveredSensor(coordinator, _make_sent_coordinator(), USER_INFO)
     assert sensor.native_value == 2
 
 
-def test_delivered_outgoing_sensor_zero_when_none_delivered():
-    sensor = DhlDeliveredOutgoingParcelsSensor(_make_coordinator([]), USER_INFO)
+def test_outgoing_delivered_sensor_merges_both_sources():
+    coordinator = _make_coordinator([], delivered_outgoing=[_return_parcel("A", category="DELIVERED")])
+    sent_coordinator = _make_sent_coordinator(delivered=[_sent_shipment("B")])
+    sensor = DhlOutgoingDeliveredSensor(coordinator, sent_coordinator, USER_INFO)
+    assert sensor.native_value == 2
+    barcodes = {p["barcode"] for p in sensor.extra_state_attributes["parcels"]}
+    assert barcodes == {"A", "B"}
+
+
+def test_outgoing_delivered_sensor_zero_when_both_sources_empty():
+    sensor = DhlOutgoingDeliveredSensor(_make_coordinator([]), _make_sent_coordinator(), USER_INFO)
     assert sensor.native_value == 0
 
 
-def test_delivered_outgoing_sensor_attributes_list_parcels():
-    delivered_outgoing = [_return_parcel("RET2", category="DELIVERED")]
-    sensor = DhlDeliveredOutgoingParcelsSensor(
-        _make_coordinator([], delivered_outgoing=delivered_outgoing), USER_INFO
-    )
+def test_outgoing_delivered_sensor_attributes_include_delivered_flag():
+    coordinator = _make_coordinator([], delivered_outgoing=[_return_parcel("RET2", category="DELIVERED")])
+    sensor = DhlOutgoingDeliveredSensor(coordinator, _make_sent_coordinator(), USER_INFO)
     attrs = sensor.extra_state_attributes
     assert attrs["parcels"][0]["barcode"] == "RET2"
     assert attrs["parcels"][0]["delivered"] is True

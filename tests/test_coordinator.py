@@ -14,6 +14,7 @@ from custom_components.dhl_nl.const import (
 )
 from custom_components.dhl_nl.coordinator import (
     DhlCoordinator,
+    DhlSentShipmentsCoordinator,
     _extract_events,
     _refresh_interval,
     build_history,
@@ -22,6 +23,7 @@ from custom_components.dhl_nl.coordinator import (
     filter_active_sent_shipments,
     filter_delivered_parcels,
     filter_delivered_returns,
+    filter_delivered_sent_shipments,
     map_event_status,
     map_parcel_status,
     normalize_parcel,
@@ -208,6 +210,59 @@ def test_delivered_shipment_is_excluded():
 
 def test_non_outgoing_type_is_excluded():
     assert filter_active_sent_shipments([_shipment("IN_DELIVERY", shipment_type="incoming")]) == []
+
+
+# ---------------------------------------------------------------------------
+# filter_delivered_sent_shipments
+# ---------------------------------------------------------------------------
+
+
+def test_delivered_outgoing_shipment_is_included():
+    assert filter_delivered_sent_shipments([_shipment("DELIVERED")]) != []
+
+
+def test_active_outgoing_shipment_excluded_from_delivered():
+    assert filter_delivered_sent_shipments([_shipment("IN_DELIVERY")]) == []
+
+
+def test_non_outgoing_type_excluded_from_delivered():
+    assert filter_delivered_sent_shipments([_shipment("DELIVERED", shipment_type="incoming")]) == []
+
+
+# ---------------------------------------------------------------------------
+# DhlSentShipmentsCoordinator — active + delivered
+# ---------------------------------------------------------------------------
+
+
+async def test_sent_shipments_coordinator_populates_active_and_delivered(hass):
+    client = MagicMock()
+    client.async_get_sent_shipments = AsyncMock(return_value=[
+        _shipment("IN_DELIVERY"),
+        _shipment("DELIVERED"),
+        _shipment("IN_DELIVERY", shipment_type="incoming"),
+    ])
+
+    coordinator = DhlSentShipmentsCoordinator(hass, client, _mock_entry())
+    result = await coordinator._async_update_data()
+
+    assert len(result) == 1
+    assert result[0]["raw"]["category"] == "IN_DELIVERY"
+    assert len(coordinator.delivered) == 1
+    assert coordinator.delivered[0]["raw"]["category"] == "DELIVERED"
+    assert coordinator.delivered[0]["delivered"] is True
+
+
+async def test_sent_shipments_coordinator_delivered_filter_applies(hass):
+    old = (datetime.now(timezone.utc) - timedelta(days=10)).isoformat()
+    shipment = _shipment("DELIVERED")
+    shipment["receivingTimeIndication"] = {"indicationType": "MomentIndication", "moment": old}
+    client = MagicMock()
+    client.async_get_sent_shipments = AsyncMock(return_value=[shipment])
+
+    coordinator = DhlSentShipmentsCoordinator(hass, client, _mock_entry("days", 7))
+    await coordinator._async_update_data()
+
+    assert coordinator.delivered == []
 
 
 # ---------------------------------------------------------------------------

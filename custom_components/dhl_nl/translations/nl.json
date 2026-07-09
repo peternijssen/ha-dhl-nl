@@ -135,11 +135,7 @@
         "name": "Bezorgde pakketten",
         "unit_of_measurement": "pakketten"
       },
-      "returning_parcels": {
-        "name": "Retouren onderweg",
-        "unit_of_measurement": "pakketten"
-      },
-      "delivered_outgoing_parcels": {
+      "outgoing_delivered_parcels": {
         "name": "Bezorgde uitgaande pakketten",
         "unit_of_measurement": "pakketten"
       },
