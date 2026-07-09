@@ -29,6 +29,12 @@
       "delivered_parcels": {
         "default": "mdi:package-variant"
       },
+      "returning_parcels": {
+        "default": "mdi:package-up"
+      },
+      "delivered_outgoing_parcels": {
+        "default": "mdi:package-check"
+      },
       "last_update": {
         "default": "mdi:clock-check-outline"
       },

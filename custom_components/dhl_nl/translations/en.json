@@ -135,6 +135,14 @@
         "name": "Delivered parcels",
         "unit_of_measurement": "parcels"
       },
+      "returning_parcels": {
+        "name": "Returning parcels",
+        "unit_of_measurement": "parcels"
+      },
+      "delivered_outgoing_parcels": {
+        "name": "Delivered outgoing parcels",
+        "unit_of_measurement": "parcels"
+      },
       "last_update": {
         "name": "Last successful update"
       },

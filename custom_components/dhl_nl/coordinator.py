@@ -299,6 +299,29 @@ def filter_active_sent_shipments(shipments: list[dict]) -> list[dict]:
     ]
 
 
+def filter_active_returns(parcels: list[dict]) -> list[dict]:
+    """Return active return parcels (on their way back to the shipper).
+
+    Sourced from the same receiver-parcel-api list as incoming parcels — a
+    webshop-generated return label never appears on the sent-shipments
+    endpoint because the account holder isn't its sender of record.
+    """
+    return [
+        p for p in parcels
+        if p.get("isReturn")
+        and p.get("category") in ACTIVE_CATEGORIES
+    ]
+
+
+def filter_delivered_returns(parcels: list[dict]) -> list[dict]:
+    """Return return parcels that have arrived back at the shipper."""
+    return [
+        p for p in parcels
+        if p.get("isReturn")
+        and p.get("category") == "DELIVERED"
+    ]
+
+
 def sort_parcels_by_ts(
     parcels: list[dict], key_field: str, *, descending: bool = False
 ) -> list[dict]:
@@ -346,6 +369,12 @@ class DhlCoordinator(DataUpdateCoordinator[list[dict]]):
         )
         self._client = client
         self.delivered: list[dict] = []
+        # Return parcels — sourced from the same parcels list as incoming,
+        # filtered on isReturn instead of excluded. ``returning`` mirrors
+        # ``data`` (active, sorted by planned_from); ``delivered_outgoing``
+        # mirrors ``delivered`` (completed, sorted by delivered_at desc).
+        self.returning: list[dict] = []
+        self.delivered_outgoing: list[dict] = []
         # barcode -> last seen ParcelStatus. ``None`` on the first refresh so
         # we can suppress events for parcels that already existed when the
         # integration started (we do not know their previous state).
@@ -415,12 +444,16 @@ class DhlCoordinator(DataUpdateCoordinator[list[dict]]):
 
         active = filter_active_parcels(raw)
         delivered = self._apply_delivered_filter(filter_delivered_parcels(raw))
+        returning = filter_active_returns(raw)
+        delivered_returns = self._apply_delivered_filter(filter_delivered_returns(raw))
         _LOGGER.debug(
-            "DHL parcels fetched: %d total, %d active, %d delivered",
-            len(raw), len(active), len(delivered),
+            "DHL parcels fetched: %d total, %d active, %d delivered, "
+            "%d returning, %d returned",
+            len(raw), len(active), len(delivered), len(returning), len(delivered_returns),
         )
         # Fetch the track-trace timeline for active + delivered parcels when
         # the option is on, before normalizing so the history is attached.
+        # Returns are excluded — track-trace is a receiver-role endpoint.
         await self._enrich_history(active + delivered)
 
         self.delivered = sort_parcels_by_ts(
@@ -430,6 +463,14 @@ class DhlCoordinator(DataUpdateCoordinator[list[dict]]):
         )
         normalized_active = sort_parcels_by_ts(
             [self._normalize(p) for p in active], "planned_from"
+        )
+        self.returning = sort_parcels_by_ts(
+            [self._normalize(p) for p in returning], "planned_from"
+        )
+        self.delivered_outgoing = sort_parcels_by_ts(
+            [self._normalize(p) for p in delivered_returns],
+            "delivered_at",
+            descending=True,
         )
 
         self._fire_change_events(normalized_active)

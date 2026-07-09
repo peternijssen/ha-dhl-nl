@@ -18,8 +18,10 @@ from custom_components.dhl_nl.coordinator import (
     _refresh_interval,
     build_history,
     filter_active_parcels,
+    filter_active_returns,
     filter_active_sent_shipments,
     filter_delivered_parcels,
+    filter_delivered_returns,
     map_event_status,
     map_parcel_status,
     normalize_parcel,
@@ -143,6 +145,48 @@ def test_delivered_filters_only_non_return_delivered():
         _parcel("IN_DELIVERY"),
     ]
     assert len(filter_delivered_parcels(parcels)) == 1
+
+
+# ---------------------------------------------------------------------------
+# filter_active_returns / filter_delivered_returns
+# ---------------------------------------------------------------------------
+
+
+def test_active_return_is_included():
+    assert filter_active_returns([_parcel("UNDERWAY", is_return=True)]) != []
+
+
+def test_non_return_excluded_from_active_returns():
+    assert filter_active_returns([_parcel("UNDERWAY", is_return=False)]) == []
+
+
+def test_delivered_return_excluded_from_active_returns():
+    assert filter_active_returns([_parcel("DELIVERED", is_return=True)]) == []
+
+
+def test_delivered_return_is_included():
+    assert filter_delivered_returns([_parcel("DELIVERED", is_return=True)]) != []
+
+
+def test_non_return_excluded_from_delivered_returns():
+    assert filter_delivered_returns([_parcel("DELIVERED", is_return=False)]) == []
+
+
+def test_active_return_excluded_from_delivered_returns():
+    assert filter_delivered_returns([_parcel("UNDERWAY", is_return=True)]) == []
+
+
+def test_mixed_parcels_split_correctly_between_incoming_and_returns():
+    parcels = [
+        _parcel("IN_DELIVERY", barcode="incoming-active"),
+        _parcel("DELIVERED", barcode="incoming-delivered"),
+        _parcel("UNDERWAY", is_return=True, barcode="return-active"),
+        _parcel("DELIVERED", is_return=True, barcode="return-delivered"),
+    ]
+    assert [p["barcode"] for p in filter_active_parcels(parcels)] == ["incoming-active"]
+    assert [p["barcode"] for p in filter_delivered_parcels(parcels)] == ["incoming-delivered"]
+    assert [p["barcode"] for p in filter_active_returns(parcels)] == ["return-active"]
+    assert [p["barcode"] for p in filter_delivered_returns(parcels)] == ["return-delivered"]
 
 
 # ---------------------------------------------------------------------------
@@ -388,6 +432,41 @@ async def test_coordinator_populates_delivered(hass):
 
     assert len(coordinator.delivered) == 1
     assert coordinator.delivered[0]["raw"]["category"] == "DELIVERED"
+
+
+async def test_coordinator_populates_returning_and_delivered_outgoing(hass):
+    recent = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
+    client = MagicMock()
+    client.async_get_parcels = AsyncMock(return_value=[
+        _parcel("IN_DELIVERY", barcode="incoming"),
+        _parcel("UNDERWAY", is_return=True, barcode="return-underway"),
+        _parcel("DELIVERED", is_return=True, moment=recent, barcode="return-delivered"),
+    ])
+
+    coordinator = DhlCoordinator(hass, client, _mock_entry("days", 7))
+    result = await coordinator._async_update_data()
+
+    # The main return value (coordinator.data) stays incoming-only.
+    assert [p["barcode"] for p in result] == ["incoming"]
+
+    assert len(coordinator.returning) == 1
+    assert coordinator.returning[0]["barcode"] == "return-underway"
+    assert coordinator.returning[0]["carrier"] == "DHL"
+
+    assert len(coordinator.delivered_outgoing) == 1
+    assert coordinator.delivered_outgoing[0]["barcode"] == "return-delivered"
+    assert coordinator.delivered_outgoing[0]["delivered"] is True
+
+
+async def test_returning_and_delivered_outgoing_empty_without_returns(hass):
+    client = MagicMock()
+    client.async_get_parcels = AsyncMock(return_value=[_parcel("IN_DELIVERY")])
+
+    coordinator = DhlCoordinator(hass, client, _mock_entry())
+    await coordinator._async_update_data()
+
+    assert coordinator.returning == []
+    assert coordinator.delivered_outgoing == []
 
 
 # ---------------------------------------------------------------------------
