@@ -16,14 +16,20 @@ def _entry_with_runtime_data(
     *,
     incoming: list[dict] | None = None,
     delivered: list[dict] | None = None,
+    returning: list[dict] | None = None,
+    delivered_outgoing: list[dict] | None = None,
     outgoing: list[dict] | None = None,
+    outgoing_delivered: list[dict] | None = None,
     user_info: dict | None = None,
 ) -> MagicMock:
     coordinator = MagicMock()
     coordinator.data = incoming or []
     coordinator.delivered = delivered or []
+    coordinator.returning = returning or []
+    coordinator.delivered_outgoing = delivered_outgoing or []
     sent_coordinator = MagicMock()
     sent_coordinator.data = outgoing or []
+    sent_coordinator.delivered = outgoing_delivered or []
 
     entry = MagicMock()
     entry.data = {"email": "user@example.com", "password": "secret"}
@@ -91,14 +97,20 @@ async def test_diagnostics_reports_counts():
     entry = _entry_with_runtime_data(
         incoming=[{"barcode": "A"}, {"barcode": "B"}],
         delivered=[{"barcode": "C"}],
+        returning=[{"barcode": "R1"}],
+        delivered_outgoing=[{"barcode": "R2"}, {"barcode": "R3"}],
         outgoing=[{"barcode": "D"}, {"barcode": "E"}, {"barcode": "F"}],
     )
     result = await async_get_config_entry_diagnostics(MagicMock(), entry)
     assert result["counts"] == {
         "incoming_active": 2,
         "delivered": 1,
+        "returning": 1,
+        "delivered_outgoing": 2,
         "outgoing_active": 3,
+        "outgoing_delivered": 0,
     }
+    assert [p["barcode"] for p in result["returning"]] == ["**REDACTED**"]
 
 
 def test_to_redact_includes_pii_keys():

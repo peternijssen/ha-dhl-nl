@@ -38,9 +38,19 @@ async def async_get_config_entry_diagnostics(
         "counts": {
             "incoming_active": len(data.coordinator.data or []),
             "delivered": len(data.coordinator.delivered or []),
+            "returning": len(data.coordinator.returning or []),
+            "delivered_outgoing": len(data.coordinator.delivered_outgoing or []),
             "outgoing_active": len(data.sent_coordinator.data or []),
+            "outgoing_delivered": len(data.sent_coordinator.delivered or []),
         },
         "incoming": async_redact_data(data.coordinator.data or [], TO_REDACT),
         "delivered": async_redact_data(data.coordinator.delivered or [], TO_REDACT),
+        "returning": async_redact_data(data.coordinator.returning or [], TO_REDACT),
+        "delivered_outgoing": async_redact_data(
+            data.coordinator.delivered_outgoing or [], TO_REDACT
+        ),
         "outgoing": async_redact_data(data.sent_coordinator.data or [], TO_REDACT),
+        "outgoing_delivered": async_redact_data(
+            data.sent_coordinator.delivered or [], TO_REDACT
+        ),
     }
