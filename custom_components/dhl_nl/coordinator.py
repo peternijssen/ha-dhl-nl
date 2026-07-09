@@ -299,6 +299,83 @@ def filter_active_sent_shipments(shipments: list[dict]) -> list[dict]:
     ]
 
 
+def filter_delivered_sent_shipments(shipments: list[dict]) -> list[dict]:
+    """Return outgoing shipments that have been delivered."""
+    return [
+        s for s in shipments
+        if s.get("type") == "outgoing"
+        and s.get("category") == "DELIVERED"
+    ]
+
+
+def filter_active_returns(parcels: list[dict]) -> list[dict]:
+    """Return active return parcels (on their way back to the shipper).
+
+    Sourced from the same receiver-parcel-api list as incoming parcels — a
+    webshop-generated return label never appears on the sent-shipments
+    endpoint because the account holder isn't its sender of record. This
+    is why returns are folded into the "outgoing" sensors alongside
+    ``DhlSentShipmentsCoordinator``'s own data rather than exposed under a
+    DHL-specific "return" name — externally a return is just one more way
+    a parcel becomes outgoing, same as PostNL's model.
+    """
+    return [
+        p for p in parcels
+        if p.get("isReturn")
+        and p.get("category") in ACTIVE_CATEGORIES
+    ]
+
+
+def filter_delivered_returns(parcels: list[dict]) -> list[dict]:
+    """Return return parcels that have arrived back at the shipper."""
+    return [
+        p for p in parcels
+        if p.get("isReturn")
+        and p.get("category") == "DELIVERED"
+    ]
+
+
+def _delivery_dt(parcel: dict) -> datetime | None:
+    """Parse the delivery datetime from a parcel's receivingTimeIndication."""
+    indication = parcel.get("receivingTimeIndication") or {}
+    indication_type = indication.get("indicationType")
+    if indication_type == "MomentIndication":
+        moment_str = indication.get("moment")
+    elif indication_type == "IntervalIndication":
+        moment_str = indication.get("start")
+    else:
+        return None
+    if not moment_str:
+        return None
+    try:
+        dt = datetime.fromisoformat(moment_str.replace("Z", "+00:00"))
+        return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+
+
+def _apply_delivered_filter(parcels: list[dict], entry: ConfigEntry) -> list[dict]:
+    """Apply the configured delivered-filter option to a list of raw parcels.
+
+    Shared by both coordinators — the same days/count option governs
+    delivered incoming parcels, delivered returns, and delivered sent
+    shipments.
+    """
+    options = entry.options
+    filter_type = options.get(CONF_DELIVERED_FILTER_TYPE, DEFAULT_DELIVERED_FILTER_TYPE)
+    filter_amount = int(options.get(CONF_DELIVERED_FILTER_AMOUNT, DEFAULT_DELIVERED_FILTER_AMOUNT))
+
+    if filter_type == "days":
+        cutoff = datetime.now(timezone.utc) - timedelta(days=filter_amount)
+        return [
+            p for p in parcels
+            if (dt := _delivery_dt(p)) is None or dt >= cutoff
+        ]
+
+    # "parcels" — return the most recent N
+    return parcels[:filter_amount]
+
+
 def sort_parcels_by_ts(
     parcels: list[dict], key_field: str, *, descending: bool = False
 ) -> list[dict]:
@@ -346,6 +423,12 @@ class DhlCoordinator(DataUpdateCoordinator[list[dict]]):
         )
         self._client = client
         self.delivered: list[dict] = []
+        # Return parcels — sourced from the same parcels list as incoming,
+        # filtered on isReturn instead of excluded. ``returning`` mirrors
+        # ``data`` (active, sorted by planned_from); ``delivered_outgoing``
+        # mirrors ``delivered`` (completed, sorted by delivered_at desc).
+        self.returning: list[dict] = []
+        self.delivered_outgoing: list[dict] = []
         # barcode -> last seen ParcelStatus. ``None`` on the first refresh so
         # we can suppress events for parcels that already existed when the
         # integration started (we do not know their previous state).
@@ -415,12 +498,16 @@ class DhlCoordinator(DataUpdateCoordinator[list[dict]]):
 
         active = filter_active_parcels(raw)
         delivered = self._apply_delivered_filter(filter_delivered_parcels(raw))
+        returning = filter_active_returns(raw)
+        delivered_returns = self._apply_delivered_filter(filter_delivered_returns(raw))
         _LOGGER.debug(
-            "DHL parcels fetched: %d total, %d active, %d delivered",
-            len(raw), len(active), len(delivered),
+            "DHL parcels fetched: %d total, %d active, %d delivered, "
+            "%d returning, %d returned",
+            len(raw), len(active), len(delivered), len(returning), len(delivered_returns),
         )
         # Fetch the track-trace timeline for active + delivered parcels when
         # the option is on, before normalizing so the history is attached.
+        # Returns are excluded — track-trace is a receiver-role endpoint.
         await self._enrich_history(active + delivered)
 
         self.delivered = sort_parcels_by_ts(
@@ -430,6 +517,14 @@ class DhlCoordinator(DataUpdateCoordinator[list[dict]]):
         )
         normalized_active = sort_parcels_by_ts(
             [self._normalize(p) for p in active], "planned_from"
+        )
+        self.returning = sort_parcels_by_ts(
+            [self._normalize(p) for p in returning], "planned_from"
+        )
+        self.delivered_outgoing = sort_parcels_by_ts(
+            [self._normalize(p) for p in delivered_returns],
+            "delivered_at",
+            descending=True,
         )
 
         self._fire_change_events(normalized_active)
@@ -553,38 +648,7 @@ class DhlCoordinator(DataUpdateCoordinator[list[dict]]):
 
     def _apply_delivered_filter(self, parcels: list[dict]) -> list[dict]:
         """Apply the configured filter to the delivered parcels list."""
-        options = self.config_entry.options
-        filter_type = options.get(CONF_DELIVERED_FILTER_TYPE, DEFAULT_DELIVERED_FILTER_TYPE)
-        filter_amount = int(options.get(CONF_DELIVERED_FILTER_AMOUNT, DEFAULT_DELIVERED_FILTER_AMOUNT))
-
-        if filter_type == "days":
-            cutoff = datetime.now(timezone.utc) - timedelta(days=filter_amount)
-            return [
-                p for p in parcels
-                if (dt := self._delivery_dt(p)) is None or dt >= cutoff
-            ]
-
-        # "parcels" — return the most recent N
-        return parcels[:filter_amount]
-
-    @staticmethod
-    def _delivery_dt(parcel: dict) -> datetime | None:
-        """Parse the delivery datetime from a parcel's receivingTimeIndication."""
-        indication = parcel.get("receivingTimeIndication") or {}
-        indication_type = indication.get("indicationType")
-        if indication_type == "MomentIndication":
-            moment_str = indication.get("moment")
-        elif indication_type == "IntervalIndication":
-            moment_str = indication.get("start")
-        else:
-            return None
-        if not moment_str:
-            return None
-        try:
-            dt = datetime.fromisoformat(moment_str.replace("Z", "+00:00"))
-            return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
-        except ValueError:
-            return None
+        return _apply_delivered_filter(parcels, self.config_entry)
 
 
 class DhlSentShipmentsCoordinator(DataUpdateCoordinator[list[dict]]):
@@ -606,6 +670,12 @@ class DhlSentShipmentsCoordinator(DataUpdateCoordinator[list[dict]]):
             update_interval=_refresh_interval(entry),
         )
         self._client = client
+        # Delivered own-sender shipments. In practice this stays empty for
+        # almost every account (see filter_active_returns docstring), but is
+        # tracked for parity so the sensor layer can merge it with delivered
+        # returns under a single "delivered outgoing" sensor without special
+        # casing which data source actually has content.
+        self.delivered: list[dict] = []
 
     async def _async_update_data(self) -> list[dict]:
         try:
@@ -617,8 +687,17 @@ class DhlSentShipmentsCoordinator(DataUpdateCoordinator[list[dict]]):
         # aiohttp.ClientError is wrapped automatically by DataUpdateCoordinator.
 
         active = filter_active_sent_shipments(raw)
+        delivered = _apply_delivered_filter(
+            filter_delivered_sent_shipments(raw), self.config_entry
+        )
         _LOGGER.debug(
-            "DHL sent shipments fetched: %d total, %d active", len(raw), len(active)
+            "DHL sent shipments fetched: %d total, %d active, %d delivered",
+            len(raw), len(active), len(delivered),
+        )
+        self.delivered = sort_parcels_by_ts(
+            [normalize_parcel(s) for s in delivered],
+            "delivered_at",
+            descending=True,
         )
         return sort_parcels_by_ts(
             [normalize_parcel(s) for s in active], "planned_from"

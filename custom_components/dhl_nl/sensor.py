@@ -16,7 +16,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import DhlConfigEntry
 from .const import DOMAIN, ParcelStatus
-from .coordinator import DhlCoordinator, DhlSentShipmentsCoordinator
+from .coordinator import DhlCoordinator, DhlSentShipmentsCoordinator, sort_parcels_by_ts
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -34,7 +34,13 @@ async def async_setup_entry(
 
     Performs the initial coordinator refreshes, then registers:
     - A summary sensor for incoming active parcels, plus one per-parcel sensor
-    - A summary sensor for outgoing active shipments
+    - Summary sensors for active and delivered outgoing parcels. "Outgoing"
+      merges two sources: the account holder's own DHL-registered sent
+      shipments (separate sent-shipments endpoint) and return parcels
+      (filtered out of the same list as incoming parcels, tagged
+      isReturn: true) — a webshop return label never appears on the
+      sent-shipments endpoint, so in practice this is almost always just
+      the returns. See ARCHITECTURE.md.
     """
     data = entry.runtime_data
     coordinator = data.coordinator
@@ -59,6 +65,7 @@ async def async_setup_entry(
         f"{user_id}_pickup_pending",
         f"{user_id}_en_route_to_service_point",
         f"{user_id}_outgoing_parcels",
+        f"{user_id}_outgoing_delivered_parcels",
         f"{user_id}_delivered_parcels",
         f"{user_id}_last_update",
     }
@@ -101,10 +108,20 @@ async def async_setup_entry(
     entities.append(DhlDeliveredParcelsSensor(coordinator=coordinator, user_info=user_info))
     entities.append(DhlLastUpdateSensor(coordinator=coordinator, user_info=user_info))
 
-    # Outgoing shipments — single summary sensor.
+    # Outgoing — single summary sensor for active, single summary sensor for
+    # delivered. Each merges the sent-shipments coordinator's own data with
+    # the main coordinator's return parcels.
     entities.append(
         DhlSentShipmentsSensor(
-            coordinator=sent_coordinator,
+            coordinator=coordinator,
+            sent_coordinator=sent_coordinator,
+            user_info=user_info,
+        )
+    )
+    entities.append(
+        DhlOutgoingDeliveredSensor(
+            coordinator=coordinator,
+            sent_coordinator=sent_coordinator,
             user_info=user_info,
         )
     )
@@ -265,14 +282,24 @@ class DhlParcelSensor(CoordinatorEntity[DhlCoordinator], SensorEntity):
 
 
 
-class DhlSentShipmentsSensor(
-    CoordinatorEntity[DhlSentShipmentsCoordinator], SensorEntity
-):
-    """Summary sensor reporting the count of active outgoing DHL shipments.
+class DhlSentShipmentsSensor(CoordinatorEntity[DhlCoordinator], SensorEntity):
+    """Summary sensor reporting the count of active outgoing DHL parcels.
 
-    Exposes the full list of in-transit sent shipments as an attribute.
-    No per-shipment sensors are created — all data is available on this
-    single entity.
+    Merges two sources into one "outgoing" list, mirroring how PostNL
+    treats outgoing parcels as a single concept regardless of how they
+    became outgoing:
+    - ``sent_coordinator.data`` — shipments the account holder registered
+      as sender via DHL directly. Almost always empty for a webshop
+      return, since the account holder isn't its sender of record.
+    - ``coordinator.returning`` — return parcels, filtered out of the same
+      receiver-parcel-api list as incoming parcels (``isReturn: true``).
+      This is the data that actually populates this sensor in practice.
+
+    Backed by ``CoordinatorEntity[DhlCoordinator]`` for the main coordinator
+    and additionally subscribes to ``sent_coordinator`` in
+    ``async_added_to_hass`` so an update from either source refreshes the
+    sensor. No per-shipment sensors are created — all data is available on
+    this single entity.
     """
 
     _attr_has_entity_name = True
@@ -283,29 +310,103 @@ class DhlSentShipmentsSensor(
 
     def __init__(
         self,
-        coordinator: DhlSentShipmentsCoordinator,
+        coordinator: DhlCoordinator,
+        sent_coordinator: DhlSentShipmentsCoordinator,
         user_info: dict[str, Any],
     ) -> None:
-        """Initialise the sent shipments sensor."""
+        """Initialise the outgoing parcels sensor."""
         super().__init__(coordinator)
+        self._sent_coordinator = sent_coordinator
         self._user_info = user_info
         user_id: str = user_info.get("userId", "")
         self._attr_unique_id = f"{user_id}_outgoing_parcels"
         self._attr_device_info = _build_device_info(user_info)
 
+    async def async_added_to_hass(self) -> None:
+        """Subscribe to the sent-shipments coordinator as well.
+
+        This entity reads from both coordinators, but ``CoordinatorEntity``
+        only subscribes to the one passed to ``super().__init__``. Without
+        this, updates that only touch the sent-shipments coordinator would
+        not refresh the sensor until the main coordinator happened to poll.
+        """
+        await super().async_added_to_hass()
+        self.async_on_remove(
+            self._sent_coordinator.async_add_listener(self.async_write_ha_state)
+        )
+
     # ------------------------------------------------------------------
     # SensorEntity interface
     # ------------------------------------------------------------------
 
+    def _parcels(self) -> list[dict]:
+        """Return active own-sender shipments and return parcels, merged and sorted."""
+        combined = list(self._sent_coordinator.data or []) + list(self.coordinator.returning)
+        return sort_parcels_by_ts(combined, "planned_from")
+
     @property
     def native_value(self) -> int:
-        """Return the number of active outgoing shipments."""
-        return len(self.coordinator.data or [])
+        """Return the number of active outgoing parcels."""
+        return len(self._parcels())
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        """Return the full list of active sent shipments as an attribute."""
-        return {"parcels": self.coordinator.data or []}
+        """Return the full list of active outgoing parcels as an attribute."""
+        return {"parcels": self._parcels()}
+
+
+class DhlOutgoingDeliveredSensor(CoordinatorEntity[DhlCoordinator], SensorEntity):
+    """Summary sensor reporting the count of delivered outgoing DHL parcels.
+
+    Merges ``sent_coordinator.delivered`` (delivered own-sender shipments —
+    in practice almost always empty) with ``coordinator.delivered_outgoing``
+    (completed returns, the data that actually populates this sensor).
+    See :class:`DhlSentShipmentsSensor` for why both sources feed a single
+    "outgoing" concept.
+    """
+
+    _attr_has_entity_name = True
+    _attr_translation_key = "outgoing_delivered_parcels"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_attribution = "Data provided by DHL"
+    _unrecorded_attributes = frozenset({"parcels"})
+
+    def __init__(
+        self,
+        coordinator: DhlCoordinator,
+        sent_coordinator: DhlSentShipmentsCoordinator,
+        user_info: dict[str, Any],
+    ) -> None:
+        """Initialise the delivered outgoing parcels sensor."""
+        super().__init__(coordinator)
+        self._sent_coordinator = sent_coordinator
+        self._user_info = user_info
+        user_id: str = user_info.get("userId", "")
+        self._attr_unique_id = f"{user_id}_outgoing_delivered_parcels"
+        self._attr_device_info = _build_device_info(user_info)
+
+    async def async_added_to_hass(self) -> None:
+        """Subscribe to the sent-shipments coordinator as well (see
+        :meth:`DhlSentShipmentsSensor.async_added_to_hass`)."""
+        await super().async_added_to_hass()
+        self.async_on_remove(
+            self._sent_coordinator.async_add_listener(self.async_write_ha_state)
+        )
+
+    def _parcels(self) -> list[dict]:
+        """Return delivered own-sender shipments and returns, merged and sorted."""
+        combined = list(self._sent_coordinator.delivered or []) + list(self.coordinator.delivered_outgoing)
+        return sort_parcels_by_ts(combined, "delivered_at", descending=True)
+
+    @property
+    def native_value(self) -> int:
+        """Return the number of delivered outgoing parcels."""
+        return len(self._parcels())
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return the full list of delivered outgoing parcels as an attribute."""
+        return {"parcels": self._parcels()}
 
 
 class DhlNextDeliverySensor(CoordinatorEntity[DhlCoordinator], SensorEntity):

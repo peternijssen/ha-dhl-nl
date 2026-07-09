@@ -35,13 +35,18 @@ DHL eCommerce NL API
         ▼                    ▼
 DhlCoordinator      DhlSentShipmentsCoordinator
 (coordinator.py)    (coordinator.py)
-  polls every 30 min, filters active parcels/shipments
+  polls every 30 min, filters both incoming
+  parcels AND outgoing returns (isReturn) out
+  of the same parcels list
         │                    │
-        ▼                    ▼
-  DhlPackagesSensor       DhlSentShipmentsSensor
-  DhlParcelSensor         (sensor.py)
+        └─────────┬──────────┘
+                   ▼
+       merged at the sensor layer:
+  DhlPackagesSensor      DhlSentShipmentsSensor        (outgoing_parcels)
+  DhlParcelSensor        DhlOutgoingDeliveredSensor    (outgoing_delivered_parcels)
   DhlNextDeliverySensor
   DhlPickupPendingSensor
+  DhlDeliveredParcelsSensor
   (sensor.py)
         │
         ▼
@@ -77,8 +82,9 @@ DhlCoordinator      DhlSentShipmentsCoordinator
 - `POLL_INTERVAL` — 1800 seconds (30 minutes), used by both coordinators
 
 ### `coordinator.py`
-- `DhlCoordinator` — polls `async_get_parcels()`, applies `filter_active_parcels()` (excludes returns and non-active categories)
-- `DhlSentShipmentsCoordinator` — polls `async_get_sent_shipments()`, applies `filter_active_sent_shipments()` (keeps only `type == "outgoing"` and active categories)
+- `DhlCoordinator` — polls `async_get_parcels()`, applies `filter_active_parcels()` / `filter_delivered_parcels()` (both exclude returns) for the incoming lists, and `filter_active_returns()` / `filter_delivered_returns()` (both require `isReturn`) for the return lists — all four filter the *same* raw parcels payload. Return lists are stored as `returning` / `delivered_outgoing`
+- `DhlSentShipmentsCoordinator` — polls `async_get_sent_shipments()`, applies `filter_active_sent_shipments()` / `filter_delivered_sent_shipments()` (`data` / `delivered`). This is the account holder's own DHL-registered shipments; it never contains webshop-generated return labels, since the account holder isn't their sender of record — in practice both lists stay empty
+- `_apply_delivered_filter(parcels, entry)` / `_delivery_dt(parcel)` are shared module-level helpers so both coordinators apply the same days/count delivered-filter option
 - Both coordinators raise `UpdateFailed` on any `DhlApiError` or `aiohttp.ClientError`; session recovery is handled by the client, not the coordinators
 
 ### `sensor.py`
@@ -87,7 +93,10 @@ DhlCoordinator      DhlSentShipmentsCoordinator
 - `DhlNextDeliverySensor` — derives the earliest `receivingTimeIndication.moment` across all active parcels; device class `TIMESTAMP` for native HA datetime handling
 - `DhlEnRouteToServicePointSensor` — counts active parcels destined for a ServicePoint where status is not yet `NOTIFICATION_FOR_PARCELSHOP_COLLECTION_HAS_BEEN_SENT`
 - `DhlPickupPendingSensor` — counts active parcels at a ServicePoint with status `NOTIFICATION_FOR_PARCELSHOP_COLLECTION_HAS_BEEN_SENT`, meaning they have arrived and the recipient has been notified
-- `DhlSentShipmentsSensor` — single summary sensor for outgoing shipments; no per-shipment entities are created
+- `DhlDeliveredParcelsSensor` — recently delivered incoming parcels (`coordinator.delivered`)
+- `DhlSentShipmentsSensor` — active **outgoing** parcels: `sent_coordinator.data` (own-sender shipments, almost always empty) merged with `coordinator.returning` (return parcels, the data that actually populates this sensor in practice)
+- `DhlOutgoingDeliveredSensor` — delivered outgoing parcels: `sent_coordinator.delivered` merged with `coordinator.delivered_outgoing`
+- Neither outgoing sensor creates per-shipment entities; both bind to `DhlCoordinator` for update notifications (see "Returns are outgoing" below for why)
 
 ## Key design decisions
 
@@ -98,7 +107,14 @@ Both coordinators share a single `DhlApiClient` instance. This means they share 
 `DhlPackagesSensor` tracks a `_known_barcodes` set. On each coordinator update it diffs the current barcodes against the known set, calls `async_add_entities` for new ones, and removes stale ones from the entity registry. This means parcel sensors appear and disappear automatically without requiring an HA restart.
 
 ### No per-shipment sensors for outgoing
-Outgoing shipments are exposed as a single sensor with a list attribute. This is intentional — outgoing shipments are less frequently monitored and the data is fully accessible via the attribute. Adding per-shipment sensors would follow the same pattern as `DhlParcelSensor` if needed in the future.
+Outgoing parcels (own sent shipments and returns alike) are exposed as a single summary sensor with a list attribute, not per-item sensors. This is intentional — they are less frequently monitored than incoming parcels and the data is fully accessible via the attribute. Adding per-item sensors would follow the same pattern as `DhlParcelSensor` if needed in the future.
+
+### Returns are outgoing, and they come from the parcels list, not the sent-shipments endpoint
+A return label generated by a webshop makes the account holder the *receiver* of the original parcel and the *sender* of the return — but not the sender of record on DHL's own-shipments API, so `async_get_sent_shipments()` never lists it. The receiver-parcel-api's `parcels` list, however, already includes both directions: normal incoming parcels (`isReturn: false`) and outgoing returns (`isReturn: true`), distinguishing itself with `destination.locationType: "RETURN"` and (once complete) `isReturnedToShipper: true`. `filter_active_returns()` / `filter_delivered_returns()` split the return parcels out of that same list by category, mirroring `filter_active_parcels()` / `filter_delivered_parcels()` for incoming. This is why returns are computed on `DhlCoordinator` (`returning`, `delivered_outgoing`) rather than on `DhlSentShipmentsCoordinator`.
+
+**Externally, a return is just outgoing — not a separate concept.** `isReturn` / `isReturnedToShipper` only drive the internal filter logic; they do not leak into entity names. `DhlSentShipmentsSensor` (`outgoing_parcels`) and `DhlOutgoingDeliveredSensor` (`outgoing_delivered_parcels`) each merge data from *both* coordinators — the account holder's own sent shipments plus the return parcels — into one list, re-sorted with `sort_parcels_by_ts`. This mirrors how PostNL treats "outgoing" as a single concept regardless of how a parcel became outgoing, and keeps DHL's entity naming identical to PostNL's so cross-carrier tooling (e.g. the hki-parcels-card Lovelace card) needs no DHL-specific special-casing. A DHL-specific `returning_parcels` / `delivered_outgoing_parcels` naming was considered and rejected for exactly this reason.
+
+Both outgoing sensors read from *two* coordinators. They are `CoordinatorEntity[DhlCoordinator]` for the main coordinator and additionally subscribe to `DhlSentShipmentsCoordinator` in `async_added_to_hass` (`async_on_remove(sent_coordinator.async_add_listener(self.async_write_ha_state))`), so an update from either source refreshes the sensor.
 
 ### Filtering at the coordinator level
 Filtering (active categories, return exclusion) happens in the coordinator, not in the sensor. This keeps sensors simple and ensures the filtered data is the single source of truth for all entities.
@@ -128,7 +144,9 @@ hass.data["dhl_nl"] = {
 | `DhlNextDeliverySensor` | `{userId}_next_delivery` | `abc123_next_delivery` |
 | `DhlEnRouteToServicePointSensor` | `{userId}_en_route_to_service_point` | `abc123_en_route_to_service_point` |
 | `DhlPickupPendingSensor` | `{userId}_pickup_pending` | `abc123_pickup_pending` |
+| `DhlDeliveredParcelsSensor` | `{userId}_delivered_parcels` | `abc123_delivered_parcels` |
 | `DhlSentShipmentsSensor` | `{userId}_outgoing_parcels` | `abc123_outgoing_parcels` |
+| `DhlOutgoingDeliveredSensor` | `{userId}_outgoing_delivered_parcels` | `abc123_outgoing_delivered_parcels` |
 
 `userId` comes from the login response and is a UUID.
 

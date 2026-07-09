@@ -1,6 +1,6 @@
 """Tests for DHL sensor property logic."""
 from datetime import datetime, timezone
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -14,17 +14,28 @@ from custom_components.dhl_nl.sensor import (
     DhlEnRouteToServicePointSensor,
     DhlIncomingParcelsSensor,
     DhlNextDeliverySensor,
+    DhlOutgoingDeliveredSensor,
     DhlParcelSensor,
     DhlPickupPendingSensor,
+    DhlSentShipmentsSensor,
 )
 
 USER_INFO = {"userId": "user123", "email": "test@example.com"}
 
 
-def _make_coordinator(parcels: list[dict], delivered: list[dict] | None = None) -> MagicMock:
+def _make_coordinator(
+    parcels: list[dict],
+    delivered: list[dict] | None = None,
+    returning: list[dict] | None = None,
+    delivered_outgoing: list[dict] | None = None,
+) -> MagicMock:
     coordinator = MagicMock()
     coordinator.data = parcels
     coordinator.delivered = delivered if delivered is not None else []
+    coordinator.returning = returning if returning is not None else []
+    coordinator.delivered_outgoing = (
+        delivered_outgoing if delivered_outgoing is not None else []
+    )
     return coordinator
 
 
@@ -268,6 +279,107 @@ def test_delivered_sensor_attributes_handle_missing_sender():
     sensor = DhlDeliveredParcelsSensor(_make_coordinator([], [parcel]), USER_INFO)
     attrs = sensor.extra_state_attributes
     assert attrs["parcels"][0]["sender"] is None
+
+
+# ---------------------------------------------------------------------------
+# DhlSentShipmentsSensor / DhlOutgoingDeliveredSensor — merge sent shipments
+# with return parcels into a single "outgoing" concept.
+# ---------------------------------------------------------------------------
+
+
+def _return_parcel(barcode: str = "RET123", category: str = "UNDERWAY") -> dict:
+    return normalize_parcel({
+        "barcode": barcode,
+        "category": category,
+        "isReturn": True,
+        "status": "PARCEL_READY_FOR_RETURN_TO_HUB",
+        "sender": {"name": "Test User"},
+        "receiver": {"name": "AE-RTN-NL"},
+    })
+
+
+def _sent_shipment(barcode: str = "SENT123") -> dict:
+    return normalize_parcel({
+        "barcode": barcode,
+        "category": "IN_DELIVERY",
+        "sender": {"name": "Test User"},
+    })
+
+
+def _make_sent_coordinator(data=None, delivered=None) -> MagicMock:
+    sent_coordinator = MagicMock()
+    sent_coordinator.data = data if data is not None else []
+    sent_coordinator.delivered = delivered if delivered is not None else []
+    return sent_coordinator
+
+
+def test_outgoing_sensor_counts_returns_only_when_sent_coordinator_empty():
+    """The common case: the sent-shipments endpoint is empty, returns are not."""
+    coordinator = _make_coordinator([], returning=[_return_parcel("A"), _return_parcel("B")])
+    sensor = DhlSentShipmentsSensor(coordinator, _make_sent_coordinator(), USER_INFO)
+    assert sensor.native_value == 2
+
+
+def test_outgoing_sensor_merges_sent_shipments_and_returns():
+    coordinator = _make_coordinator([], returning=[_return_parcel("A")])
+    sent_coordinator = _make_sent_coordinator(data=[_sent_shipment("B")])
+    sensor = DhlSentShipmentsSensor(coordinator, sent_coordinator, USER_INFO)
+    assert sensor.native_value == 2
+    barcodes = {p["barcode"] for p in sensor.extra_state_attributes["parcels"]}
+    assert barcodes == {"A", "B"}
+
+
+def test_outgoing_sensor_zero_when_both_sources_empty():
+    sensor = DhlSentShipmentsSensor(_make_coordinator([]), _make_sent_coordinator(), USER_INFO)
+    assert sensor.native_value == 0
+
+
+def test_outgoing_delivered_sensor_counts_delivered_returns_only_when_sent_empty():
+    delivered_outgoing = [
+        _return_parcel("A", category="DELIVERED"),
+        _return_parcel("B", category="DELIVERED"),
+    ]
+    coordinator = _make_coordinator([], delivered_outgoing=delivered_outgoing)
+    sensor = DhlOutgoingDeliveredSensor(coordinator, _make_sent_coordinator(), USER_INFO)
+    assert sensor.native_value == 2
+
+
+def test_outgoing_delivered_sensor_merges_both_sources():
+    coordinator = _make_coordinator([], delivered_outgoing=[_return_parcel("A", category="DELIVERED")])
+    sent_coordinator = _make_sent_coordinator(delivered=[_sent_shipment("B")])
+    sensor = DhlOutgoingDeliveredSensor(coordinator, sent_coordinator, USER_INFO)
+    assert sensor.native_value == 2
+    barcodes = {p["barcode"] for p in sensor.extra_state_attributes["parcels"]}
+    assert barcodes == {"A", "B"}
+
+
+def test_outgoing_delivered_sensor_zero_when_both_sources_empty():
+    sensor = DhlOutgoingDeliveredSensor(_make_coordinator([]), _make_sent_coordinator(), USER_INFO)
+    assert sensor.native_value == 0
+
+
+def test_outgoing_delivered_sensor_attributes_include_delivered_flag():
+    coordinator = _make_coordinator([], delivered_outgoing=[_return_parcel("RET2", category="DELIVERED")])
+    sensor = DhlOutgoingDeliveredSensor(coordinator, _make_sent_coordinator(), USER_INFO)
+    attrs = sensor.extra_state_attributes
+    assert attrs["parcels"][0]["barcode"] == "RET2"
+    assert attrs["parcels"][0]["delivered"] is True
+
+
+@pytest.mark.parametrize("sensor_cls", [DhlSentShipmentsSensor, DhlOutgoingDeliveredSensor])
+async def test_outgoing_sensor_also_subscribes_to_sent_coordinator(sensor_cls):
+    """Each outgoing sensor reads from both coordinators, so it must also
+    listen to the sent-shipments coordinator, not just the main one."""
+    sent_coordinator = _make_sent_coordinator()
+    sensor = sensor_cls(_make_coordinator([]), sent_coordinator, USER_INFO)
+    sensor.async_on_remove = MagicMock()
+    with patch(
+        "custom_components.dhl_nl.sensor.CoordinatorEntity.async_added_to_hass",
+        AsyncMock(),
+    ):
+        await sensor.async_added_to_hass()
+    sent_coordinator.async_add_listener.assert_called_once_with(sensor.async_write_ha_state)
+    sensor.async_on_remove.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
